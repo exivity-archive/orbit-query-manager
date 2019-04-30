@@ -1,7 +1,8 @@
-import { QueryBuilder, Schema, ModelDefinition } from '@orbit/data'
+import { QueryBuilder, Schema, ModelDefinition, FindRecord } from '@orbit/data'
 import { QueryManager } from '../QueryManager'
 import Store from '@orbit/store'
 import { Dict } from '@orbit/utils'
+import { Term } from '../types';
 
 const modelDefenition: Dict<ModelDefinition> = {
 
@@ -41,806 +42,767 @@ beforeEach(() => {
   manager = new QueryManager(store.fork(), { skip: ['account'] })
 })
 
-test('QueryManager.query(...) should return a queryRef', async (done) => {
-  await manager._store.update(t => t.addRecord({ type: 'account', id: '1' }))
+test('QueryManager._extractTerms(...) returns an ordered array of terms', () => {
+  const account = { type: 'account', id: '1' }
 
-  const { queryRef } = manager.query({
-    Account: (q: QueryBuilder) => q.findRecord({ type: 'account', id: '1' })
-  })
+  const query = (q: QueryBuilder) => q.findRecord(account)
+  const queries = { Cccount: query, Account: query, Bccount: query, }
+
+  const terms = manager._extractTerms(queries)
+
+  expect(terms).toMatchObject([
+    { key: 'Account', expression: { op: 'findRecord', record: account } },
+    { key: 'Bccount', expression: { op: 'findRecord', record: account } },
+    { key: 'Cccount', expression: { op: 'findRecord', record: account } }
+  ])
+})
+
+test('QueryManager.query(...) should return a queryRef', () => {
+  const query = { Account: (q: QueryBuilder) => q.findRecord({ type: 'account', id: '1' }) }
+
+  const { queryRef } = manager.query(query)
 
   expect(typeof queryRef).toBe('string')
-  done()
 })
 
 test('QueryManager.subscribe(...) subscribes you to the request being made', async done => {
-  await manager._store.update(t => t.addRecord({ type: 'account', id: '1' }))
+  const account = { type: 'account', id: '1' }
 
-  const { queryRef } = manager.query({
-    Account: (q: QueryBuilder) => q.findRecord({ type: 'account', id: '1' })
-  }, true)
+  const query = { Account: (q: QueryBuilder) => q.findRecord(account) }
+  const initialFetch = true
 
-  const subscription = new Promise(resolve => {
-    manager.subscribe(queryRef, () => { resolve('done') })
-  })
+  await manager._store.update(t => t.addRecord(account))
 
-  expect(await subscription).toBe('done')
+  const { queryRef } = manager.query(query, initialFetch)
+
+  const result = await new Promise(resolve =>
+    manager.subscribe(queryRef, () => { resolve(' q(0_0)p ') })
+  )
+
+  expect(result).toBe(' q(0_0)p ')
   done()
 })
 
-test('QueryManager.subscribe(...) will return a ref to the same subscription object if the queries are identical', async done => {
-  await manager._store.update(t => t.addRecord({ type: 'account', id: '1' }))
+test('QueryManager.subscribe(...) will return a ref to the same result object if the queries are identical', async done => {
+  const account = { type: 'account', id: '1' }
 
-  const query1 = manager.query({
-    Account: (q: QueryBuilder) => q.findRecord({ type: 'account', id: '1' })
-  }, true)
+  const query = { Account: (q: QueryBuilder) => q.findRecord(account) }
+  const initialFetch = true
 
-  const query2 = manager.query({
-    Account: (q: QueryBuilder) => q.findRecord({ type: 'account', id: '1' })
-  }, true)
+  await manager._store.update(t => t.addRecord(account))
 
-  manager.subscribe(query1.queryRef, () => { })
-  manager.subscribe(query2.queryRef, () => { })
+  const refs1 = manager.query(query, initialFetch)
+  const refs2 = manager.query(query, initialFetch)
 
-  expect(query1.queryRef).toBe(query2.queryRef)
+  manager.subscribe(refs1.queryRef, () => { })
+  manager.subscribe(refs2.queryRef, () => { })
 
+  expect(refs1.queryRef).toBe(refs2.queryRef)
   done()
 })
 
-test('QueryManager.subscribe(...) will subscribe to an ongoing identical query if one is going on', async done => {
-  await manager._store.update(t => t.addRecord({ type: 'account', id: '1' }))
+test('QueryManager.subscribe(...) will subscribe to an ongoing identical query\'s status', async done => {
+  const account = { type: 'account', id: '1' }
 
-  const query1 = manager.query({
-    Account: (q: QueryBuilder) => q.findRecord({ type: 'account', id: '1' })
-  }, true)
+  const query = { Account: (q: QueryBuilder) => q.findRecord(account) }
+  const initialFetch = true
 
-  const query2 = manager.query({
-    Account: (q: QueryBuilder) => q.findRecord({ type: 'account', id: '1' })
-  }, true)
+  await manager._store.update(t => t.addRecord(account))
 
-  manager.subscribe(query1.queryRef, () => { })
-  manager.subscribe(query2.queryRef, () => { })
+  const refs1 = manager.query(query, initialFetch)
+  const refs2 = manager.query(query, initialFetch)
 
-  expect(typeof query1.statusRef).toBeDefined()
-  expect(typeof query2.statusRef).toBeDefined()
-  expect(query1.statusRef).toBe(query2.statusRef)
+  manager.subscribe(refs1.queryRef, () => { })
+  manager.subscribe(refs2.queryRef, () => { })
 
+  expect(refs1.statusRef).toBe(refs2.statusRef)
   done()
 })
 
-test('QueryManager.unsubscribe(...) delete subscription object when there are no listeners left', async done => {
-  await manager._store.update(t => t.addRecord({ type: 'account', id: '1' }))
+test('QueryManager.unsubscribe(...) delete result object when there are no listeners left', async done => {
+  const account = { type: 'account', id: '1' }
 
-  const query1 = manager.query({
-    Account: (q: QueryBuilder) => q.findRecord({ type: 'account', id: '1' })
-  })
+  const query = { Account: (q: QueryBuilder) => q.findRecord(account) }
 
-  const query2 = manager.query({
-    Account: (q: QueryBuilder) => q.findRecord({ type: 'account', id: '1' })
-  })
+  await manager._store.update(t => t.addRecord(account))
 
-  manager.subscribe(query1.queryRef, () => { })
-  expect(manager.subscriptions[query1.queryRef].listeners).toBe(1)
+  const refs1 = manager.query(query)
+  const refs2 = manager.query(query)
 
-  manager.subscribe(query2.queryRef, () => { })
-  expect(manager.subscriptions[query2.queryRef].listeners).toBe(2)
+  manager.subscribe(refs1.queryRef, () => { })
+  manager.subscribe(refs2.queryRef, () => { })
 
-  manager.unsubscribe(query1)
-  expect(manager.subscriptions[query1.queryRef].listeners).toBe(1)
+  expect(manager.subscriptions[refs2.queryRef].listeners).toBe(2)
 
-  manager.unsubscribe(query2)
-  expect(manager.subscriptions[query1.queryRef]).toBeUndefined()
+  manager.unsubscribe(refs1)
+  manager.unsubscribe(refs2)
 
+  expect(manager.subscriptions[refs1.queryRef]).toBeUndefined()
   done()
 })
 
 test('QueryManager.unsubscribe(...) delete statuses object when there are no listeners left', async done => {
-  await manager._store.update(t => t.addRecord({ type: 'account', id: '1' }))
+  const account = { type: 'account', id: '1' }
 
-  const query1 = manager.query({
-    Account: (q: QueryBuilder) => q.findRecord({ type: 'account', id: '1' })
-  }, true)
+  const query = { Account: (q: QueryBuilder) => q.findRecord(account) }
+  const initialFetch = true
 
-  expect(manager.statuses[query1.statusRef!].listeners).toBe(1)
+  await manager._store.update(t => t.addRecord(account))
 
-  const query2 = manager.query({
-    Account: (q: QueryBuilder) => q.findRecord({ type: 'account', id: '1' })
-  }, true)
+  const refs1 = manager.query(query, initialFetch)
+  const refs2 = manager.query(query, initialFetch)
 
-  expect(manager.statuses[query2.statusRef!].listeners).toBe(2)
+  expect(manager.statuses[refs2.statusRef!].listeners).toBe(2)
 
-  manager.subscribe(query1.queryRef, () => { })
-  manager.subscribe(query2.queryRef, () => { })
+  manager.subscribe(refs1.queryRef, () => { })
+  manager.subscribe(refs2.queryRef, () => { })
 
-  manager.unsubscribe(query1)
-  expect(manager.statuses[query1.statusRef!].listeners).toBe(1)
+  manager.unsubscribe(refs1)
+  manager.unsubscribe(refs2)
 
-  manager.unsubscribe(query2)
-  expect(manager.statuses[query1.statusRef!]).toBeUndefined()
-
+  expect(manager.statuses[refs1.statusRef!]).toBeUndefined()
   done()
 })
 
 test('QueryManager.queryCache(...) returns null if no match is found', () => {
-  const query = manager.query({
-    Account: (q: QueryBuilder) => q.findRecord({ type: 'account', id: '1' })
-  })
+  const account = { type: 'account', id: '1' }
 
-  manager.subscribe(query.queryRef, () => { })
+  const query = { Account: (q: QueryBuilder) => q.findRecord(account) }
 
-  const result = manager.queryCache(manager.subscriptions[query.queryRef].terms)
+  const refs = manager.query(query)
+  const terms = manager.subscriptions[refs.queryRef].terms
+  const result = manager.queryCache(terms)
 
   expect(result).toBe(null)
 })
 
 test('QueryManager.queryCache(...) returns an object when a match is found', async done => {
-  const query = manager.query({
-    Account: (q: QueryBuilder) => q.findRecord({ type: 'account', id: '1' })
-  })
+  const account = { type: 'account', id: '1' }
 
-  const subscription = new Promise((resolve) => {
-    // @ts-ignore
-    manager.subscribe(query.queryRef, () => { resolve(manager.queryCache(manager.subscriptions[query.queryRef].terms)) })
-  })
+  const query = { Account: (q: QueryBuilder) => q.findRecord(account) }
 
-  manager._store.update(t => t.addRecord({ type: 'account', id: '1' }))
+  const refs = manager.query(query)
+  const terms = manager.subscriptions[refs.queryRef].terms
 
-  expect(await subscription).toMatchObject({ Account: { type: 'account', id: '1' } })
+  const subscription = new Promise((resolve) =>
+    manager.subscribe(refs.queryRef, () => { resolve() })
+  )
+
+  manager._store.update(t => t.addRecord(account))
+
+  await subscription
+
+  const result = manager.queryCache(terms)
+
+  expect(result).toMatchObject({ Account: account })
   done()
 })
 
 test('QueryManager.queryCache(...) gets cancelled when beforeQuery returns true', async done => {
+  const account = { type: 'account', id: '1' }
 
-  const query = manager.query({
-    Account: (q: QueryBuilder) => q.findRecord({ type: 'account', id: '1' })
-  })
+  const query = { Account: (q: QueryBuilder) => q.findRecord(account) }
 
-  const subscription = new Promise((resolve) => {
-    manager.subscribe(query.queryRef, () => {
-      // @ts-ignore
-      resolve(manager.queryCache(manager.subscriptions[query.queryRef].terms,
-        {
-          beforeQuery: (expression: any, extensions: any) => {
-            // extensions.skip: ['account'] as defined at the top of the file
-            if (extensions.skip.includes(expression.record.type)) {
-              return true
-            }
-          }
+  const refs = manager.query(query)
+  const terms = manager.subscriptions[refs.queryRef].terms
+
+  const result = new Promise((resolve) => {
+    manager.subscribe(refs.queryRef, () => {
+      resolve(manager.queryCache(terms, {
+        beforeQuery: (expression, extensions) => {
+          // extensions.skip: ['account'] as defined at the top of the file
+          if (extensions.skip.includes((expression as FindRecord).record.type)) return true
         }
-      ))
+      })
+      )
     })
   })
 
-  manager._store.update(t => t.addRecord({ type: 'account', id: '1' }))
+  manager._store.update(t => t.addRecord(account))
 
-  expect(await subscription).toBe(null)
+  expect(await result).toBe(null)
   done()
 })
 
 test('QueryManager.queryCache(...) calls onQuery with the results', async done => {
+  const account = { type: 'account', id: '1' }
 
-  const query = manager.query({
-    Account: (q: QueryBuilder) => q.findRecord({ type: 'account', id: '1' })
+  const query = { Account: (q: QueryBuilder) => q.findRecord(account) }
+
+  const refs = manager.query(query)
+  const terms = manager.subscriptions[refs.queryRef].terms
+
+  const result = new Promise((resolve) => {
+    manager.subscribe(refs.queryRef, () =>
+      manager.queryCache(terms, { onQuery: (results) => resolve(results) })
+    )
   })
 
-  const subscription = new Promise((resolve) => {
-    manager.subscribe(query.queryRef, () => {
-      // @ts-ignore
-      manager.queryCache(manager.subscriptions[query.queryRef].terms,
-        {
-          onQuery: (results, extensions) => {
-            resolve(results)
-          }
-        }
-      )
-    })
-  })
+  manager._store.update(t => t.addRecord(account))
 
-  manager._store.update(t => t.addRecord({ type: 'account', id: '1' }))
-
-  expect(await subscription).toMatchObject({ Account: { type: 'account', id: '1' } })
+  expect(await result).toMatchObject({ Account: account })
   done()
 })
 
 test('QueryManager.queryCache(...) calls onError when no matches are found', async done => {
+  const account = { type: 'account', id: '1' }
 
-  await manager._store.update(t => t.addRecord({ type: 'account', id: '1' }))
+  const query = { Account: (q: QueryBuilder) => q.findRecord(account) }
 
-  const query = manager.query({
-    Account: (q: QueryBuilder) => q.findRecord({ type: 'account', id: '1' })
-  })
+  await manager._store.update(t => t.addRecord(account))
 
-  const subscription = new Promise((resolve) => {
-    manager.subscribe(query.queryRef, () => {
-      // @ts-ignore
-      manager.queryCache(manager.subscriptions[query.queryRef].terms,
-        {
-          onError: (err, extensions) => {
-            resolve(err.message)
-          }
-        }
-      )
+  const refs = manager.query(query)
+  const terms = manager.subscriptions[refs.queryRef].terms
+
+  const result = new Promise((resolve) => {
+    manager.subscribe(refs.queryRef, () => {
+      manager.queryCache(terms, { onError: (err) => resolve(err.message) })
     })
   })
 
   manager._store.update(t => t.removeRecord({ type: 'account', id: '1' }))
 
-  expect(await subscription).toBeDefined()
+  expect(await result).toBeDefined()
   done()
 })
 
 describe('QueryManager._shouldUpdate(...)', () => {
-  test('It should return true when the operation is findRecords and a record of the listened to type present in records', async (done) => {
-    const shouldUpdate = manager._shouldUpdate(
-      [{ key: 'Test', expression: { op: 'findRecords', type: 'account' } }],
-      [{ type: 'account', id: '1' }],
-      []
-    )
+  test('findRecords: It should return true when a record of the listened to type present in records', () => {
+    const term: Term = { key: 'Test', expression: { op: 'findRecords', type: 'account' } }
+    const changedRecord = { type: 'account', id: '1' }
 
-    expect(await shouldUpdate).toBe(true)
-    done()
+    const shouldUpdate = manager._shouldUpdate([term], [changedRecord], [])
+
+    expect(shouldUpdate).toBe(true)
   })
 
-  test('It should return true when the operation is findRecords and a record of the listened to type present in related records', async (done) => {
-    const shouldUpdate = manager._shouldUpdate(
-      [{ key: 'Test', expression: { op: 'findRecords', type: 'account' } }],
-      [],
-      [{ type: 'account', id: '1' }]
-    )
+  test('findRecords: It should return true  when a record of the listened to type present in relatedRecords', () => {
+    const term: Term = { key: 'Test', expression: { op: 'findRecords', type: 'account' } }
+    const changedRelatedRecord = { type: 'account', id: '1' }
 
-    expect(await shouldUpdate).toBe(true)
-    done()
+    const shouldUpdate = manager._shouldUpdate([term], [], [changedRelatedRecord])
+
+    expect(shouldUpdate).toBe(true)
   })
 
-  test('It should return true with any other operation if a record matches an expression', async (done) => {
-    const shouldUpdate = manager._shouldUpdate(
-      [{ key: 'Test', expression: { op: 'findRecord', record: { type: 'account', id: '1' } } }],
-      [{ type: 'account', id: '1' }],
-      []
-    )
+  test('It should return true with any other operation if a record matches an expression', () => {
+    const term: Term = { key: 'Test', expression: { op: 'findRecord', record: { type: 'account', id: '1' } } }
+    const changedRecord = { type: 'account', id: '1' }
 
-    expect(await shouldUpdate).toBe(true)
-    done()
+    const shouldUpdate = manager._shouldUpdate([term], [changedRecord], [])
+
+    expect(shouldUpdate).toBe(true)
   })
 
-  test('It should return true with any other operation if a relatedRecord matches an expression (hasOne)', async (done) => {
-    await manager._store.update(t => [
-      t.addRecord({ type: 'account', id: '1' }),
-      t.addRecord({ type: 'profile', id: '1' }),
-      t.replaceRelatedRecord({ type: 'account', id: '1' }, 'profile', { type: 'profile', id: '1' })]
-    )
+  test('It should return true with any other operation if the type of a relatedRecord matches the expression (hasOne)', () => {
+    const term: Term = { key: 'Test', expression: { op: 'findRecord', record: { type: 'account', id: '1' } } }
+    const changedRelatedRecord = { type: 'account', id: '1' }
 
-    const shouldUpdate1 = manager._shouldUpdate(
-      [{ key: 'Test', expression: { op: 'findRecord', record: { type: 'account', id: '1' } } }],
-      [],
-      [{ type: 'account', id: '1' }]
-    )
+    const shouldUpdate = manager._shouldUpdate([term], [], [changedRelatedRecord])
 
-    expect(await shouldUpdate1).toBe(true)
-    done()
+    expect(shouldUpdate).toBe(true)
   })
 
-  test('It should return true with any other operation if a relatedRecord matches an expression (hasMany)', async (done) => {
+  test('It should return true with any other operation if the type of a relatedRecord matches the expression (hasMany)', () => {
+    const term: Term = { key: 'Test', expression: { op: 'findRecord', record: { type: 'account', id: '1' } } }
+    const changedRelatedRecord = { type: 'account', id: '1' }
 
-    await manager._store.update(t => [
-      t.addRecord({ type: 'account', id: '1' }),
-      t.addRecord({ type: 'service', id: '1' }),
-      t.addToRelatedRecords({ type: 'service', id: '1' }, 'subscribers', { type: 'account', id: '1' })
-    ])
+    const shouldUpdate = manager._shouldUpdate([term], [], [changedRelatedRecord])
 
-    const shouldUpdate1 = manager._shouldUpdate(
-      [{ key: 'Test', expression: { op: 'findRecord', record: { type: 'account', id: '1' } } }],
-      [],
-      [{ type: 'account', id: '1' }]
-    )
-
-    expect(await shouldUpdate1).toBe(true)
-    done()
+    expect(shouldUpdate).toBe(true)
   })
 })
 
 describe('Listener gets called after', () => {
-
   test('AddRecordOperation while listening to a type of record', async done => {
-    await manager._store.update(t => t.addRecord({ type: 'account', id: '1' }))
+    const account = { type: 'account', id: '1' }
 
-    const { queryRef } = manager.query({
-      Account: (q: QueryBuilder) => q.findRecords('account')
-    })
+    const query = { Account: (q: QueryBuilder) => q.findRecords('account') }
 
-    const subscription = new Promise(resolve => {
-      manager.subscribe(queryRef, () => { resolve('done') })
-    })
+    const { queryRef } = manager.query(query)
 
-    manager._store.update(t => t.addRecord({ type: 'account', id: '1' }))
+    const result = new Promise(resolve =>
+      manager.subscribe(queryRef, () => { resolve(' q(0_0)p ') }))
 
-    expect(await subscription).toBe('done')
+    manager._store.update(t => t.addRecord(account))
+
+    expect(await result).toBe(' q(0_0)p ')
     done()
   })
 
   test('ReplaceRecordOperation while listening to a type of record', async done => {
-    await manager._store.update(t => t.addRecord({ type: 'account', id: '1' }))
+    const account = { type: 'account', id: '1' }
 
-    const { queryRef } = manager.query({
-      Account: (q: QueryBuilder) => q.findRecords('account')
-    })
+    const query = { Account: (q: QueryBuilder) => q.findRecords('account') }
 
-    const subscription = new Promise(resolve => {
-      manager.subscribe(queryRef, () => { resolve('done') })
-    })
+    await manager._store.update(t => t.addRecord(account))
 
-    manager._store.update(t => t.replaceRecord({ type: 'account', id: '1' }))
+    const { queryRef } = manager.query(query)
+    const result = new Promise(resolve => manager.subscribe(queryRef, () => { resolve(' q(0_0)p ') }))
 
-    expect(await subscription).toBe('done')
+    manager._store.update(t => t.replaceRecord(account))
+
+    expect(await result).toBe(' q(0_0)p ')
     done()
   })
 
   test('RemoveRecordOperation while listening to a type of record', async done => {
-    await manager._store.update(t => t.addRecord({ type: 'account', id: '1' }))
+    const account = { type: 'account', id: '1' }
 
-    const { queryRef } = manager.query({
-      Account: (q: QueryBuilder) => q.findRecords('account')
-    })
+    const query = { Account: (q: QueryBuilder) => q.findRecords('account') }
 
-    const subscription = new Promise(resolve => {
-      manager.subscribe(queryRef, () => { resolve('done') })
-    })
+    await manager._store.update(t => t.addRecord(account))
 
-    manager._store.update(t => t.removeRecord({ type: 'account', id: '1' }))
+    const { queryRef } = manager.query(query)
+    const result = new Promise(resolve => manager.subscribe(queryRef, () => { resolve(' q(0_0)p ') }))
 
-    expect(await subscription).toBe('done')
+    manager._store.update(t => t.removeRecord(account))
+
+    expect(await result).toBe(' q(0_0)p ')
     done()
   })
 
   test('ReplaceKeyOperation while listening to a type of record', async done => {
-    await manager._store.update(t => t.addRecord({ type: 'account', id: '1' }))
+    const account = { type: 'account', id: '1' }
 
-    const { queryRef } = manager.query({
-      Account: (q: QueryBuilder) => q.findRecords('account')
-    })
+    const query = { Account: (q: QueryBuilder) => q.findRecords('account') }
 
-    const subscription = new Promise(resolve => {
-      manager.subscribe(queryRef, () => { resolve('done') })
-    })
+    await manager._store.update(t => t.addRecord(account))
 
-    manager._store.update(t => t.replaceKey({ type: 'account', id: '1' }, 'testKey', 'testValue'))
+    const { queryRef } = manager.query(query)
+    const result = new Promise(resolve => manager.subscribe(queryRef, () => { resolve(' q(0_0)p ') }))
 
-    expect(await subscription).toBe('done')
+    manager._store.update(t => t.replaceKey(account, 'testKey', 'testValue'))
+
+    expect(await result).toBe(' q(0_0)p ')
     done()
   })
 
   test('ReplaceAttributeOperation while listening to a type of record', async done => {
-    await manager._store.update(t => t.addRecord({ type: 'account', id: '1' }))
+    const account = { type: 'account', id: '1' }
 
-    const { queryRef } = manager.query({
-      Account: (q: QueryBuilder) => q.findRecords('account')
-    })
+    const query = { Account: (q: QueryBuilder) => q.findRecords('account') }
 
-    const subscription = new Promise(resolve => {
-      manager.subscribe(queryRef, () => { resolve('done') })
-    })
+    await manager._store.update(t => t.addRecord(account))
 
-    manager._store.update(t => t.replaceAttribute({ type: 'account', id: '1' }, 'test', 'hello'))
+    const { queryRef } = manager.query(query)
+    const result = new Promise(resolve => manager.subscribe(queryRef, () => { resolve(' q(0_0)p ') }))
 
-    expect(await subscription).toBe('done')
+    manager._store.update(t => t.replaceAttribute(account, 'test', 'hello'))
+
+    expect(await result).toBe(' q(0_0)p ')
     done()
   })
 
   test('AddToRelatedRecordsOperation while listening to a type of record (record perspective)', async done => {
-    await manager._store.update(t => [t.addRecord({ type: 'account', id: '1' }), t.addRecord({ type: 'service', id: '1' })])
+    const account = { type: 'account', id: '1' }
 
-    const { queryRef } = manager.query({
-      Account: (q: QueryBuilder) => q.findRecords('account')
-    })
+    const query = { Account: (q: QueryBuilder) => q.findRecords('account') }
 
-    const subscription = new Promise(resolve => {
-      manager.subscribe(queryRef, () => { resolve('done') })
-    })
+    await manager._store.update(t => [t.addRecord(account), t.addRecord({ type: 'service', id: '1' })])
 
-    manager._store.update(t => t.addToRelatedRecords({ type: 'account', id: '1' }, 'services', { type: 'service', id: '1' }))
+    const { queryRef } = manager.query(query)
+    const result = new Promise(resolve => manager.subscribe(queryRef, () => { resolve(' q(0_0)p ') }))
 
-    expect(await subscription).toBe('done')
+    manager._store.update(t => t.addToRelatedRecords(account, 'services', { type: 'service', id: '1' }))
+
+    expect(await result).toBe(' q(0_0)p ')
     done()
   })
 
   test('AddToRelatedRecordsOperation while listening to a type of record (relation perspective)', async done => {
-    await manager._store.update(t => [t.addRecord({ type: 'account', id: '1' }), t.addRecord({ type: 'service', id: '1' })])
+    const account = { type: 'account', id: '1' }
+    const service = { type: 'service', id: '1' }
+    const query = { Account: (q: QueryBuilder) => q.findRecords('account') }
 
-    const { queryRef } = manager.query({
-      Account: (q: QueryBuilder) => q.findRecords('account')
-    })
+    await manager._store.update(t => [t.addRecord(account), t.addRecord(service)])
 
-    const subscription = new Promise(resolve => {
-      manager.subscribe(queryRef, () => { resolve('done') })
-    })
+    const { queryRef } = manager.query(query)
+    const result = new Promise(resolve => manager.subscribe(queryRef, () => { resolve(' q(0_0)p ') }))
 
-    manager._store.update(t => t.addToRelatedRecords({ type: 'service', id: '1' }, 'subscribers', { type: 'account', id: '1' }))
+    manager._store.update(t => t.addToRelatedRecords(service, 'subscribers', account))
 
-    expect(await subscription).toBe('done')
+    expect(await result).toBe(' q(0_0)p ')
     done()
   })
 
   test('RemoveFromRelatedRecordsOperation while listening to a type of record (record perspective)', async done => {
+    const account = { type: 'account', id: '1' }
+    const service = { type: 'service', id: '1' }
+
+    const query = { Account: (q: QueryBuilder) => q.findRecords('account') }
+
     await manager._store.update(t => [
-      t.addRecord({ type: 'account', id: '1' }),
-      t.addRecord({ type: 'service', id: '1' }),
-      t.addToRelatedRecords({ type: 'service', id: '1' }, 'subscribers', { type: 'account', id: '1' })
+      t.addRecord(account),
+      t.addRecord(service),
+      t.addToRelatedRecords(account, 'services', service)
     ])
 
-    const { queryRef } = manager.query({
-      Account: (q: QueryBuilder) => q.findRecords('account')
-    })
+    const { queryRef } = manager.query(query)
+    const result = new Promise(resolve => manager.subscribe(queryRef, () => { resolve(' q(0_0)p ') }))
 
-    const subscription = new Promise(resolve => {
-      manager.subscribe(queryRef, () => { resolve('done') })
-    })
+    manager._store.update(t => t.removeFromRelatedRecords(account, 'services', service))
 
-    manager._store.update(t => t.removeFromRelatedRecords({ type: 'account', id: '1' }, 'services', { type: 'service', id: '1' }))
-
-    expect(await subscription).toBe('done')
+    expect(await result).toBe(' q(0_0)p ')
     done()
   })
 
   test('RemoveFromRelatedRecordsOperation while listening to a type of record (relation perspective)', async done => {
+    const account = { type: 'account', id: '1' }
+    const service = { type: 'service', id: '1' }
+
+    const query = { Account: (q: QueryBuilder) => q.findRecords('account') }
+
     await manager._store.update(t => [
-      t.addRecord({ type: 'account', id: '1' }),
-      t.addRecord({ type: 'service', id: '1' }),
-      t.addToRelatedRecords({ type: 'service', id: '1' }, 'subscribers', { type: 'account', id: '1' })
+      t.addRecord(account),
+      t.addRecord(service),
+      t.addToRelatedRecords(service, 'subscribers', account)
     ])
 
-    const { queryRef } = manager.query({
-      Account: (q: QueryBuilder) => q.findRecords('account')
-    })
+    const { queryRef } = manager.query(query)
+    const result = new Promise(resolve => manager.subscribe(queryRef, () => { resolve(' q(0_0)p ') }))
 
-    const subscription = new Promise(resolve => {
-      manager.subscribe(queryRef, () => { resolve('done') })
-    })
+    manager._store.update(t => t.removeFromRelatedRecords(service, 'subscribers', account))
 
-    manager._store.update(t => t.removeFromRelatedRecords({ type: 'service', id: '1' }, 'subscribers', { type: 'account', id: '1' }))
-
-    expect(await subscription).toBe('done')
+    expect(await result).toBe(' q(0_0)p ')
     done()
   })
 
   test('ReplaceRelatedRecordsOperation while listening to a type of record (record perspective)', async done => {
+    const account = { type: 'account', id: '1' }
+    const service1 = { type: 'service', id: '1' }
+    const service2 = { type: 'service', id: '2' }
+
+    const query = { Account: (q: QueryBuilder) => q.findRecords('account') }
+
     await manager._store.update(t => [
-      t.addRecord({ type: 'account', id: '1' }),
-      t.addRecord({ type: 'account', id: '2' }),
-      t.addRecord({ type: 'service', id: '1' }),
-      t.addRecord({ type: 'service', id: '2' }),
-      t.addToRelatedRecords({ type: 'service', id: '1' }, 'subscribers', { type: 'account', id: '1' })
+      t.addRecord(account),
+      t.addRecord(service1),
+      t.addRecord(service2),
+      t.addToRelatedRecords(account, 'services', service1)
     ])
 
-    const { queryRef } = manager.query({
-      Account: (q: QueryBuilder) => q.findRecords('account')
-    })
+    const { queryRef } = manager.query(query)
+    const result = new Promise(resolve => manager.subscribe(queryRef, () => { resolve(' q(0_0)p ') }))
 
-    const subscription = new Promise(resolve => {
-      manager.subscribe(queryRef, () => { resolve('done') })
-    })
+    manager._store.update(t => t.replaceRelatedRecords(account, 'services', [service2]))
 
-    manager._store.update(t => t.replaceRelatedRecords({ type: 'account', id: '1' }, 'services', [{ type: 'service', id: '2' }]))
-
-    expect(await subscription).toBe('done')
+    expect(await result).toBe(' q(0_0)p ')
     done()
   })
 
   test('ReplaceRelatedRecordsOperation while listening to a type of record (relation perspective)', async done => {
+    const account1 = { type: 'account', id: '1' }
+    const account2 = { type: 'account', id: '2' }
+    const service = { type: 'service', id: '1' }
+
+    const query = { Account: (q: QueryBuilder) => q.findRecords('account') }
+
     await manager._store.update(t => [
-      t.addRecord({ type: 'account', id: '1' }),
-      t.addRecord({ type: 'account', id: '2' }),
-      t.addRecord({ type: 'service', id: '1' }),
-      t.addRecord({ type: 'service', id: '2' }),
-      t.addToRelatedRecords({ type: 'service', id: '1' }, 'subscribers', { type: 'account', id: '1' })
+      t.addRecord(account1),
+      t.addRecord(account2),
+      t.addRecord(service),
+      t.addToRelatedRecords(service, 'subscribers', account1)
     ])
 
-    const { queryRef } = manager.query({
-      Account: (q: QueryBuilder) => q.findRecords('account')
-    })
+    const { queryRef } = manager.query(query)
+    const result = new Promise(resolve => manager.subscribe(queryRef, () => { resolve(' q(0_0)p ') }))
 
-    const subscription = new Promise(resolve => {
-      manager.subscribe(queryRef, () => { resolve('done') })
-    })
+    manager._store.update(t => t.replaceRelatedRecords(service, 'subscribers', [account2]))
 
-    manager._store.update(t => t.replaceRelatedRecords({ type: 'service', id: '1' }, 'subscribers', [{ type: 'account', id: '2' }]))
-
-    expect(await subscription).toBe('done')
+    expect(await result).toBe(' q(0_0)p ')
     done()
   })
 
   test('ReplaceRelatedRecordOperation while listening to a type of record (record perspective)', async done => {
+    const account = { type: 'account', id: '1' }
+    const profile1 = { type: 'profile', id: '1' }
+    const profile2 = { type: 'profile', id: '2' }
+
+    const query = { Account: (q: QueryBuilder) => q.findRecords('account') }
+
     await manager._store.update(t => [
-      t.addRecord({ type: 'account', id: '1' }),
-      t.addRecord({ type: 'account', id: '2' }),
-      t.addRecord({ type: 'profile', id: '1' }),
-      t.addRecord({ type: 'profile', id: '2' }),
-      t.replaceRelatedRecord({ type: 'profile', id: '1' }, 'account', { type: 'account', id: '1' })
+      t.addRecord(account),
+      t.addRecord(profile1),
+      t.addRecord(profile2),
+      t.replaceRelatedRecord(account, 'profile', profile1)
     ])
 
-    const { queryRef } = manager.query({
-      Account: (q: QueryBuilder) => q.findRecords('account')
-    })
+    const { queryRef } = manager.query(query)
+    const result = new Promise(resolve => manager.subscribe(queryRef, () => { resolve(' q(0_0)p ') }))
 
-    const subscription = new Promise(resolve => {
-      manager.subscribe(queryRef, () => { resolve('done') })
-    })
+    manager._store.update(t => t.replaceRelatedRecord(account, 'profile', profile2))
 
-    manager._store.update(t => t.replaceRelatedRecord({ type: 'account', id: '1' }, 'profile', { type: 'profile', id: '2' }))
-
-    expect(await subscription).toBe('done')
+    expect(await result).toBe(' q(0_0)p ')
     done()
   })
 
   test('ReplaceRelatedRecordOperation while listening to a type of record (relation perspective)', async done => {
+    const account1 = { type: 'account', id: '1' }
+    const account2 = { type: 'account', id: '2' }
+    const profile = { type: 'profile', id: '1' }
+
+    const query = { Account: (q: QueryBuilder) => q.findRecords('account') }
+
     await manager._store.update(t => [
-      t.addRecord({ type: 'account', id: '1' }),
-      t.addRecord({ type: 'account', id: '2' }),
-      t.addRecord({ type: 'profile', id: '1' }),
-      t.addRecord({ type: 'profile', id: '2' }),
-      t.replaceRelatedRecord({ type: 'profile', id: '1' }, 'account', { type: 'account', id: '1' })
+      t.addRecord(account1),
+      t.addRecord(account2),
+      t.addRecord(profile),
+      t.replaceRelatedRecord(profile, 'account', account2)
     ])
 
-    const { queryRef } = manager.query({
-      Account: (q: QueryBuilder) => q.findRecords('account')
-    })
+    const { queryRef } = manager.query(query)
+    const result = new Promise(resolve => manager.subscribe(queryRef, () => { resolve(' q(0_0)p ') }))
 
-    const subscription = new Promise(resolve => {
-      manager.subscribe(queryRef, () => { resolve('done') })
-    })
+    manager._store.update(t => t.replaceRelatedRecord(profile, 'account', account2))
 
-    manager._store.update(t => t.replaceRelatedRecord({ type: 'profile', id: '1' }, 'account', { type: 'account', id: '2' }))
-
-    expect(await subscription).toBe('done')
+    expect(await result).toBe(' q(0_0)p ')
     done()
   })
 
   test('AddRecordOperation while listening to a specific record', async done => {
-    const { queryRef } = manager.query({
-      Account: (q: QueryBuilder) => q.findRecord({ type: 'account', id: '1' })
-    })
+    const account = { type: 'account', id: '1' }
 
-    const subscription = new Promise(resolve => {
-      manager.subscribe(queryRef, () => { resolve('done') })
-    })
+    const query = { Account: (q: QueryBuilder) => q.findRecord(account) }
 
-    manager._store.update(t => t.addRecord({ type: 'account', id: '1' }))
+    const { queryRef } = manager.query(query)
+    const result = new Promise(resolve => manager.subscribe(queryRef, () => { resolve(' q(0_0)p ') }))
 
-    expect(await subscription).toBe('done')
+    manager._store.update(t => t.addRecord(account))
+
+    expect(await result).toBe(' q(0_0)p ')
     done()
   })
 
   test('ReplaceRecordOperation while listening to a specific record', async done => {
-    await manager._store.update(t => t.addRecord({ type: 'account', id: '1' }))
+    const account = { type: 'account', id: '1' }
 
-    const { queryRef } = manager.query({
-      Account: (q: QueryBuilder) => q.findRecord({ type: 'account', id: '1' })
-    })
+    const query = { Account: (q: QueryBuilder) => q.findRecord(account) }
 
-    const subscription = new Promise(resolve => {
-      manager.subscribe(queryRef, () => { resolve('done') })
-    })
+    await manager._store.update(t => t.addRecord(account))
 
-    manager._store.update(t => t.replaceRecord({ type: 'account', id: '1' }))
+    const { queryRef } = manager.query(query)
+    const result = new Promise(resolve => manager.subscribe(queryRef, () => { resolve(' q(0_0)p ') }))
 
-    expect(await subscription).toBe('done')
+    manager._store.update(t => t.replaceRecord(account))
+
+    expect(await result).toBe(' q(0_0)p ')
     done()
   })
 
   test('RemoveRecordOperation while listening to a specific record', async done => {
-    await manager._store.update(t => t.addRecord({ type: 'account', id: '1' }))
+    const account = { type: 'account', id: '1' }
 
-    const { queryRef } = manager.query({
-      Account: (q: QueryBuilder) => q.findRecord({ type: 'account', id: '1' })
-    })
+    const query = { Account: (q: QueryBuilder) => q.findRecord(account) }
 
-    const subscription = new Promise(resolve => {
-      manager.subscribe(queryRef, () => { resolve('done') })
-    })
+    await manager._store.update(t => t.addRecord(account))
 
-    manager._store.update(t => t.removeRecord({ type: 'account', id: '1' }))
+    const { queryRef } = manager.query(query)
+    const result = new Promise(resolve => manager.subscribe(queryRef, () => { resolve(' q(0_0)p ') }))
 
-    expect(await subscription).toBe('done')
+    manager._store.update(t => t.removeRecord(account))
+
+    expect(await result).toBe(' q(0_0)p ')
     done()
   })
 
   test('ReplaceKeyOperation while listening to a specific record', async done => {
-    await manager._store.update(t => t.addRecord({ type: 'account', id: '1' }))
+    const account = { type: 'account', id: '1' }
 
-    const { queryRef } = manager.query({
-      Account: (q: QueryBuilder) => q.findRecord({ type: 'account', id: '1' })
-    })
+    const query = { Account: (q: QueryBuilder) => q.findRecord(account) }
 
-    const subscription = new Promise(resolve => {
-      manager.subscribe(queryRef, () => { resolve('done') })
-    })
+    await manager._store.update(t => t.addRecord(account))
 
-    manager._store.update(t => t.replaceKey({ type: 'account', id: '1' }, 'testKey', 'testValue'))
+    const { queryRef } = manager.query(query)
+    const result = new Promise(resolve => manager.subscribe(queryRef, () => { resolve(' q(0_0)p ') }))
 
-    expect(await subscription).toBe('done')
+    manager._store.update(t => t.replaceKey(account, 'testKey', 'testValue'))
+
+    expect(await result).toBe(' q(0_0)p ')
     done()
   })
 
   test('ReplaceAttributeOperation while listening to a specific record', async done => {
-    await manager._store.update(t => t.addRecord({ type: 'account', id: '1' }))
+    const account = { type: 'account', id: '1' }
 
-    const { queryRef } = manager.query({
-      Account: (q: QueryBuilder) => q.findRecord({ type: 'account', id: '1' })
-    })
+    const query = { Account: (q: QueryBuilder) => q.findRecord(account) }
 
-    const subscription = new Promise(resolve => {
-      manager.subscribe(queryRef, () => { resolve('done') })
-    })
+    await manager._store.update(t => t.addRecord(account))
 
-    manager._store.update(t => t.replaceAttribute({ type: 'account', id: '1' }, 'test', 'hello'))
+    const { queryRef } = manager.query(query)
+    const result = new Promise(resolve => manager.subscribe(queryRef, () => { resolve(' q(0_0)p ') }))
 
-    expect(await subscription).toBe('done')
+    manager._store.update(t => t.replaceAttribute(account, 'test', 'hello'))
+
+    expect(await result).toBe(' q(0_0)p ')
     done()
   })
 
   test('AddToRelatedRecordsOperation while listening to a specific record (record perspective)', async done => {
-    await manager._store.update(t => [t.addRecord({ type: 'account', id: '1' }), t.addRecord({ type: 'service', id: '1' })])
+    const account = { type: 'account', id: '1' }
+    const service = { type: 'service', id: '1' }
 
-    const { queryRef } = manager.query({
-      Account: (q: QueryBuilder) => q.findRecord({ type: 'account', id: '1' })
-    })
+    const query = { Account: (q: QueryBuilder) => q.findRecord(account) }
 
-    const subscription = new Promise(resolve => {
-      manager.subscribe(queryRef, () => { resolve('done') })
-    })
+    await manager._store.update(t => [t.addRecord(account), t.addRecord(service)])
 
-    manager._store.update(t => t.addToRelatedRecords({ type: 'account', id: '1' }, 'services', { type: 'service', id: '1' }))
+    const { queryRef } = manager.query(query)
+    const result = new Promise(resolve => manager.subscribe(queryRef, () => { resolve(' q(0_0)p ') }))
 
-    expect(await subscription).toBe('done')
+    manager._store.update(t => t.addToRelatedRecords(account, 'services', service))
+
+    expect(await result).toBe(' q(0_0)p ')
     done()
   })
 
   test('AddToRelatedRecordsOperation while listening to a specific record (relation perspective)', async done => {
-    await manager._store.update(t => [t.addRecord({ type: 'account', id: '1' }), t.addRecord({ type: 'service', id: '1' })])
+    const account = { type: 'account', id: '1' }
+    const service = { type: 'service', id: '1' }
 
-    const { queryRef } = manager.query({
-      Account: (q: QueryBuilder) => q.findRecord({ type: 'account', id: '1' })
-    })
+    const query = { Account: (q: QueryBuilder) => q.findRecord(account) }
 
-    const subscription = new Promise(resolve => {
-      manager.subscribe(queryRef, () => { resolve('done') })
-    })
+    await manager._store.update(t => [t.addRecord(account), t.addRecord(service)])
 
-    manager._store.update(t => t.addToRelatedRecords({ type: 'service', id: '1' }, 'subscribers', { type: 'account', id: '1' }))
+    const { queryRef } = manager.query(query)
+    const result = new Promise(resolve => manager.subscribe(queryRef, () => { resolve(' q(0_0)p ') }))
 
-    expect(await subscription).toBe('done')
+    manager._store.update(t => t.addToRelatedRecords(service, 'subscribers', account))
+
+    expect(await result).toBe(' q(0_0)p ')
     done()
   })
 
   test('RemoveFromRelatedRecordsOperation while listening to a specific record (record perspective)', async done => {
+    const account = { type: 'account', id: '1' }
+    const service = { type: 'service', id: '1' }
+
+    const query = { Account: (q: QueryBuilder) => q.findRecord(account) }
+
     await manager._store.update(t => [
-      t.addRecord({ type: 'account', id: '1' }),
-      t.addRecord({ type: 'service', id: '1' }),
-      t.addToRelatedRecords({ type: 'service', id: '1' }, 'subscribers', { type: 'account', id: '1' })
+      t.addRecord(account),
+      t.addRecord(service),
+      t.addToRelatedRecords(account, 'services', service)
     ])
 
-    const { queryRef } = manager.query({
-      Account: (q: QueryBuilder) => q.findRecord({ type: 'account', id: '1' })
-    })
+    const { queryRef } = manager.query(query)
+    const result = new Promise(resolve => manager.subscribe(queryRef, () => { resolve(' q(0_0)p ') }))
 
-    const subscription = new Promise(resolve => {
-      manager.subscribe(queryRef, () => { resolve('done') })
-    })
+    manager._store.update(t => t.removeFromRelatedRecords(account, 'services', service))
 
-    manager._store.update(t => t.removeFromRelatedRecords({ type: 'account', id: '1' }, 'services', { type: 'service', id: '1' }))
-
-    expect(await subscription).toBe('done')
+    expect(await result).toBe(' q(0_0)p ')
     done()
   })
 
   test('RemoveFromRelatedRecordsOperation while listening to a specific record (relation perspective)', async done => {
+    const account = { type: 'account', id: '1' }
+    const service = { type: 'service', id: '1' }
+
+    const query = { Account: (q: QueryBuilder) => q.findRecord(account) }
+
     await manager._store.update(t => [
-      t.addRecord({ type: 'account', id: '1' }),
-      t.addRecord({ type: 'service', id: '1' }),
-      t.addToRelatedRecords({ type: 'service', id: '1' }, 'subscribers', { type: 'account', id: '1' })
+      t.addRecord(account),
+      t.addRecord(service),
+      t.addToRelatedRecords(service, 'subscribers', account)
     ])
 
-    const { queryRef } = manager.query({
-      Account: (q: QueryBuilder) => q.findRecord({ type: 'account', id: '1' })
-    })
+    const { queryRef } = manager.query(query)
+    const result = new Promise(resolve => manager.subscribe(queryRef, () => { resolve(' q(0_0)p ') }))
 
-    const subscription = new Promise(resolve => {
-      manager.subscribe(queryRef, () => { resolve('done') })
-    })
+    manager._store.update(t => t.removeFromRelatedRecords(service, 'subscribers', account))
 
-    manager._store.update(t => t.removeFromRelatedRecords({ type: 'service', id: '1' }, 'subscribers', { type: 'account', id: '1' }))
-
-    expect(await subscription).toBe('done')
+    expect(await result).toBe(' q(0_0)p ')
     done()
   })
 
   test('ReplaceRelatedRecordsOperation while listening to a specific record (record perspective)', async done => {
+    const account = { type: 'account', id: '1' }
+    const service1 = { type: 'service', id: '1' }
+    const service2 = { type: 'service', id: '2' }
+
+    const query = { Account: (q: QueryBuilder) => q.findRecord(account) }
+
     await manager._store.update(t => [
-      t.addRecord({ type: 'account', id: '1' }),
-      t.addRecord({ type: 'account', id: '2' }),
-      t.addRecord({ type: 'service', id: '1' }),
-      t.addRecord({ type: 'service', id: '2' }),
-      t.addToRelatedRecords({ type: 'service', id: '1' }, 'subscribers', { type: 'account', id: '1' })
+      t.addRecord(account),
+      t.addRecord(service1),
+      t.addRecord(service2),
+      t.addToRelatedRecords(account, 'services', service1)
     ])
 
-    const { queryRef } = manager.query({
-      Account: (q: QueryBuilder) => q.findRecord({ type: 'account', id: '1' })
-    })
+    const { queryRef } = manager.query(query)
+    const result = new Promise(resolve => manager.subscribe(queryRef, () => { resolve(' q(0_0)p ') }))
 
-    const subscription = new Promise(resolve => {
-      manager.subscribe(queryRef, () => { resolve('done') })
-    })
+    manager._store.update(t => t.replaceRelatedRecords(account, 'services', [service2]))
 
-    manager._store.update(t => t.replaceRelatedRecords({ type: 'account', id: '1' }, 'services', [{ type: 'service', id: '2' }]))
-
-    expect(await subscription).toBe('done')
+    expect(await result).toBe(' q(0_0)p ')
     done()
   })
 
   test('ReplaceRelatedRecordsOperation while listening to a specific record (relation perspective)', async done => {
+    const account1 = { type: 'account', id: '1' }
+    const account2 = { type: 'account', id: '2' }
+    const service = { type: 'service', id: '2' }
+
+    const query = { Account: (q: QueryBuilder) => q.findRecord(account1) }
+
     await manager._store.update(t => [
-      t.addRecord({ type: 'account', id: '1' }),
-      t.addRecord({ type: 'account', id: '2' }),
-      t.addRecord({ type: 'service', id: '1' }),
-      t.addRecord({ type: 'service', id: '2' }),
-      t.addToRelatedRecords({ type: 'service', id: '1' }, 'subscribers', { type: 'account', id: '1' })
+      t.addRecord(account1),
+      t.addRecord(account2),
+      t.addRecord(service),
+      t.addToRelatedRecords(service, 'subscribers', account1)
     ])
 
-    const { queryRef } = manager.query({
-      Account: (q: QueryBuilder) => q.findRecord({ type: 'account', id: '1' })
-    })
+    const { queryRef } = manager.query(query)
+    const result = new Promise(resolve => manager.subscribe(queryRef, () => { resolve(' q(0_0)p ') }))
 
-    const subscription = new Promise(resolve => {
-      manager.subscribe(queryRef, () => { resolve('done') })
-    })
+    manager._store.update(t => t.replaceRelatedRecords(service, 'subscribers', [account2]))
 
-    manager._store.update(t => t.replaceRelatedRecords({ type: 'service', id: '1' }, 'subscribers', [{ type: 'account', id: '2' }]))
-
-    expect(await subscription).toBe('done')
+    expect(await result).toBe(' q(0_0)p ')
     done()
   })
 
   test('ReplaceRelatedRecordOperation while listening to a specific record (record perspective)', async done => {
+    const account = { type: 'account', id: '1' }
+    const profile1 = { type: 'profile', id: '1' }
+    const profile2 = { type: 'profile', id: '2' }
+
+    const query = { Account: (q: QueryBuilder) => q.findRecord(account) }
+
     await manager._store.update(t => [
-      t.addRecord({ type: 'account', id: '1' }),
-      t.addRecord({ type: 'account', id: '2' }),
-      t.addRecord({ type: 'profile', id: '1' }),
-      t.addRecord({ type: 'profile', id: '2' }),
-      t.replaceRelatedRecord({ type: 'profile', id: '1' }, 'account', { type: 'account', id: '1' })
+      t.addRecord(account),
+      t.addRecord(profile1),
+      t.addRecord(profile2),
+      t.replaceRelatedRecord(account, 'profile', profile1)
     ])
 
-    const { queryRef } = manager.query({
-      Account: (q: QueryBuilder) => q.findRecord({ type: 'account', id: '1' })
-    })
+    const { queryRef } = manager.query(query)
+    const result = new Promise(resolve => manager.subscribe(queryRef, () => { resolve(' q(0_0)p ') }))
 
-    const subscription = new Promise(resolve => {
-      manager.subscribe(queryRef, () => { resolve('done') })
-    })
+    manager._store.update(t => t.replaceRelatedRecord(account, 'profile', profile2))
 
-    manager._store.update(t => t.replaceRelatedRecord({ type: 'account', id: '1' }, 'profile', { type: 'profile', id: '2' }))
-
-    expect(await subscription).toBe('done')
+    expect(await result).toBe(' q(0_0)p ')
     done()
   })
 
   test('ReplaceRelatedRecordOperation while listening to a specific ecord (relation perspective)', async done => {
+    const account1 = { type: 'account', id: '1' }
+    const account2 = { type: 'account', id: '2' }
+    const profile = { type: 'profile', id: '1' }
+
+    const query = { Account: (q: QueryBuilder) => q.findRecord(account1) }
+
     await manager._store.update(t => [
-      t.addRecord({ type: 'account', id: '1' }),
-      t.addRecord({ type: 'account', id: '2' }),
-      t.addRecord({ type: 'profile', id: '1' }),
-      t.addRecord({ type: 'profile', id: '2' }),
-      t.replaceRelatedRecord({ type: 'profile', id: '1' }, 'account', { type: 'account', id: '1' })
+      t.addRecord(account1),
+      t.addRecord(account2),
+      t.addRecord(profile),
+      t.replaceRelatedRecord(profile, 'account', account1)
     ])
 
-    const { queryRef } = manager.query({
-      Account: (q: QueryBuilder) => q.findRecord({ type: 'account', id: '1' })
-    })
+    const { queryRef } = manager.query(query)
+    const result = new Promise(resolve => manager.subscribe(queryRef, () => { resolve(' q(0_0)p ') }))
 
-    const subscription = new Promise(resolve => {
-      manager.subscribe(queryRef, () => { resolve('done') })
-    })
+    manager._store.update(t => t.replaceRelatedRecord(profile, 'account', account2))
 
-    manager._store.update(t => t.replaceRelatedRecord({ type: 'profile', id: '1' }, 'account', { type: 'account', id: '2' }))
-
-    expect(await subscription).toBe('done')
+    expect(await result).toBe(' q(0_0)p ')
     done()
   })
 })
