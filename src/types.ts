@@ -27,26 +27,22 @@ export type Expressions = FindRecord | FindRelatedRecord | FindRecords | FindRel
 
 export type Term = { key: string, expression: Expressions }
 
+export type Listener = () => void
+
 export interface RecordObject {
   [key: string]: Record
 }
 
-export interface QueryRefs { queryRef: string, statusRef?: string }
-
-export interface OngoingQuery {
-  queries: Promise<RecordObject>[],
-  listeners: number
-  statusRef: string
-}
-
 export interface OngoingQueries {
-  [key: string]: OngoingQuery
+  [key: string]: {
+    request: Promise<RecordObject>[]
+    afterRequestQueue: (() => void)[]
+  }
 }
 
 export interface Status {
   error: null | Error,
   loading: boolean,
-  listeners: number
 }
 
 export interface Statuses {
@@ -55,7 +51,7 @@ export interface Statuses {
 
 export interface Subscription {
   terms: Term[]
-  listeners: number,
+  listeners: Listener[]
 }
 
 export interface Subscriptions {

@@ -7,12 +7,12 @@ import {
   Expressions,
   Queries,
   Subscriptions,
-  QueryRefs,
   Statuses,
   QueryCacheOptions,
+  Listener,
 } from './types'
 import { Transform, RecordOperation, RecordIdentity } from '@orbit/data'
-import { identityIsEqual } from './helpers'
+import { identityIsEqual, shouldUpdate } from './helpers'
 
 export class QueryManager<E extends { [key: string]: any } = any>  {
   _extensions: E
@@ -31,15 +31,19 @@ export class QueryManager<E extends { [key: string]: any } = any>  {
     this.statuses = {}
   }
 
-  generateQueryRef (queries: Queries) {
+  registerQuery (queries: Queries) {
     const terms = this._extractTerms(queries)
+    const queryRef = JSON.stringify(terms)
 
-    let queryRef = JSON.stringify(terms)
-
-    if (this.subscriptions[queryRef]) return queryRef
-
-    this.subscriptions[queryRef] = { listeners: 0, terms }
+    if (!this.subscriptions[queryRef]) {
+      this.subscriptions[queryRef] = { listeners: [], terms }
+      this._store.on('transform', this._compare.bind(this, queryRef))
+    }
     return queryRef
+  }
+
+  subscribe (queryRef: string, listener: () => void) {
+    this.subscriptions[queryRef].listeners.push(listener)
   }
 
   _extractTerms (queries: Queries): Term[] {
@@ -48,15 +52,33 @@ export class QueryManager<E extends { [key: string]: any } = any>  {
     )
   }
 
+
+  unsubscribe (queryRef: string, listener: Listener) {
+    this.subscriptions[queryRef].listeners =
+      this.subscriptions[queryRef].listeners.filter(item => item === listener)
+
+    if (this.subscriptions[queryRef].listeners.length === 0) {
+      if (this._ongoingQueries[queryRef] && this.statuses[queryRef].loading) {
+        this._ongoingQueries[queryRef].afterRequestQueue.push(() => {
+          delete this.subscriptions[queryRef]
+          delete this.statuses[queryRef]
+        })
+      } else {
+        delete this.subscriptions[queryRef]
+        delete this.statuses[queryRef]
+      }
+
+      this._store.off('transform', this._compare.bind(this, queryRef))
+    }
+  }
+
   query (queryRef: string) {
-    return this._ongoingQueries[queryRef] ? this._ongoingQueries[queryRef].statusRef : this._query(queryRef)
+    if (!this._ongoingQueries[queryRef]) {
+      this._query(queryRef)
+    }
   }
 
   _query (queryRef: string) {
-
-    const statusRef = this._generateStatusRef(queryRef)
-    this.statuses[statusRef] = { error: null, loading: false, listeners: 0 }
-
     const terms = this.subscriptions[queryRef].terms
 
     const queries: Promise<RecordObject>[] = terms
@@ -68,23 +90,30 @@ export class QueryManager<E extends { [key: string]: any } = any>  {
         })
       )
 
-    // The statuses[statusRef] object can be deleted before this gets called if client unsubscribes
-    Promise.all(queries)
+    this.statuses[queryRef] = { error: null, loading: false }
+
+    this._ongoingQueries[queryRef] = { afterRequestQueue: [], request: queries }
+
+    Promise.all(this._ongoingQueries[queryRef].request)
       .then(() => {
-        if (this.statuses[statusRef]) {
-          this.statuses[statusRef].loading = false
-        }
+
+        this.statuses[queryRef].loading = false
+
+        this._ongoingQueries[queryRef].afterRequestQueue.forEach(fn => fn())
+        this.subscriptions[queryRef].listeners.forEach(listener => listener())
+
+        delete this._ongoingQueries[queryRef]
       })
       .catch(error => {
-        if (this.statuses[statusRef]) {
-          this.statuses[statusRef].loading = false
-          this.statuses[statusRef].error = error
-        }
+
+        this.statuses[queryRef].loading = false
+        this.statuses[queryRef].error = error
+
+        this._ongoingQueries[queryRef].afterRequestQueue.forEach(fn => fn())
+        this.subscriptions[queryRef].listeners.forEach(listener => listener())
+
+        delete this._ongoingQueries[queryRef]
       })
-
-    this._ongoingQueries[queryRef] = { queries, listeners: 0, statusRef }
-
-    return statusRef
   }
 
   queryCache (terms: Term[], { beforeQuery, onQuery, onError }: QueryCacheOptions<E> = {}): RecordObject | null {
@@ -115,44 +144,7 @@ export class QueryManager<E extends { [key: string]: any } = any>  {
     return null
   }
 
-  _generateStatusRef (queryRef: string) {
-    let i = 1
-    while (true) {
-      const statusRef = queryRef + `_${i}`
-      if (!this.statuses[statusRef]) return statusRef
-      else i++
-    }
-  }
-
-  async subscribeToFetch (queryRef: string, listener: () => void) {
-    if (this._ongoingQueries[queryRef]) this._ongoingQueries[queryRef].listeners++
-    else throw new Error('There is no fetch going on with this queryRef. You possibly forgot to make a query before subscribing')
-
-    try {
-      await Promise.all(this._ongoingQueries[queryRef].queries);
-      listener();
-      this._unsubscribeFromFetch(queryRef);
-    }
-    catch (error) {
-      listener();
-      this._unsubscribeFromFetch(queryRef);
-    }
-  }
-
-  subscribeToCache (queryRef: string, listener: () => void) {
-    if (this.subscriptions[queryRef]) this.subscriptions[queryRef].listeners++
-    else throw new Error('There is no subscription with this queryRef. Generate one with manager.generateQueryRef(...)')
-
-    this._store.on('transform', this._compare.bind(this, queryRef, listener))
-  }
-
-  subscribeToStatus (statusRef: string) {
-    if (this.statuses[statusRef]) this.statuses[statusRef].listeners++
-    else throw new Error('There is no status with this statusRef.')
-
-  }
-
-  _compare (queryRef: string, listener: () => void, transform: Transform) {
+  _compare (queryRef: string, transform: Transform) {
     const operations = transform.operations as RecordOperation[]
 
     const records: RecordIdentity[] = []
@@ -176,47 +168,8 @@ export class QueryManager<E extends { [key: string]: any } = any>  {
 
     const terms = this.subscriptions[queryRef].terms
 
-    if (this._shouldUpdate(terms, records, relatedRecords)) listener()
-  }
-
-  _shouldUpdate = (
-    terms: Term[],
-    records: RecordIdentity[],
-    relatedRecords: RecordIdentity[]
-  ) => {
-    return terms.some(({ expression }) => {
-      if (expression.op === 'findRecords') {
-        return records.some(({ type }) => type === expression.type) ||
-          relatedRecords.some(({ type }) => type === expression.type)
-      }
-
-      return records.some(record => !!identityIsEqual(expression.record, record))
-        // @todo find a way to check for identity for relationships
-        || relatedRecords.some(record => record.type === expression.record.type)
-    })
-  }
-
-  _unsubscribeFromFetch (queryRef: string) {
-    this._ongoingQueries[queryRef].listeners--
-
-    if (this._ongoingQueries[queryRef].listeners === 0) {
-      delete this._ongoingQueries[queryRef]
-    }
-  }
-
-  unsubscribeFromCache (queryRef: string) {
-    this.subscriptions[queryRef].listeners--
-
-    if (this.subscriptions[queryRef].listeners === 0) {
-      delete this.subscriptions[queryRef]
-    }
-  }
-
-  unsubscribeFromStatus (statusRef: string) {
-    this.statuses[statusRef].listeners--
-
-    if (this.statuses[statusRef].listeners === 0) {
-      delete this.statuses[statusRef]
+    if (shouldUpdate(terms, records, relatedRecords)) {
+      this.subscriptions[queryRef].listeners.forEach(listener => listener())
     }
   }
 }

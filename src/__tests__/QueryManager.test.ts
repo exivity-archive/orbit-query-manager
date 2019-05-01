@@ -3,6 +3,7 @@ import { QueryManager } from '../QueryManager'
 import Store from '@orbit/store'
 import { Dict } from '@orbit/utils'
 import { Term } from '../types';
+import { shouldUpdate } from '../helpers';
 
 const modelDefenition: Dict<ModelDefinition> = {
 
@@ -61,135 +62,77 @@ test('QueryManager.subscribeToFetch(...) subscribes you to the request being mad
   const account = { type: 'account', id: '1' }
 
   const query = { Account: (q: QueryBuilder) => q.findRecord(account) }
-  const queryRef = manager.generateQueryRef(query)
+
+  const queryRef = manager.registerQuery(query)
 
   await manager._store.update(t => t.addRecord(account))
 
-  manager.query(queryRef)
-
-  const result = new Promise(resolve => manager.subscribeToFetch(queryRef, () => { resolve(' q(0_0)p ') }))
+  const result = new Promise(resolve => {
+    manager.subscribe(queryRef, () => { resolve(' q(0_0)p ') })
+    manager.query(queryRef)
+  })
 
   expect(await result).toBe(' q(0_0)p ')
   done()
 })
 
-test('QueryManager.subscribeToFetch(...) throws an error when an invalid queryRef is given', async done => {
-  let message: string
-  try {
-    await manager.subscribeToFetch('hellloo', () => { })
-  } catch (err) {
-    message = err.message
-  }
-
-  expect(message).toBe('There is no fetch going on with this queryRef. You possibly forgot to make a query before subscribing')
-  done()
-})
-
-test('QueryManager.subscribeToCache(...) throws an error when an invalid queryRef is given', async done => {
-  let message: string
-  try {
-    await manager.subscribeToCache('hellloo', () => { })
-  } catch (err) {
-    message = err.message
-  }
-
-  expect(message).toBe('There is no subscription with this queryRef. Generate one with manager.generateQueryRef(...)')
-  done()
-})
-
-test('QueryManager.subscribeToStatus(...) throws an error when an invalid queryRef is given', async done => {
-  let message: string
-  try {
-    await manager.subscribeToStatus('hellloo')
-  } catch (err) {
-    message = err.message
-  }
-
-  expect(message).toBe('There is no status with this statusRef.')
-  done()
-})
-
-test('QueryManager.query(...) will return the same statusRef if an identical request is already going on', async done => {
+test('QueryManager.unsubscribe(...) delete result object when there are no listeners left', async done => {
   const account = { type: 'account', id: '1' }
 
   const query = { Account: (q: QueryBuilder) => q.findRecord(account) }
-  const queryRef = manager.generateQueryRef(query)
 
-  await manager._store.update(t => t.addRecord(account))
+  const queryRef1 = manager.registerQuery(query)
+  const queryRef2 = manager.registerQuery(query)
+  const listener1 = () => { }
+  const listener2 = () => { }
 
-  const statusRef1 = manager.query(queryRef)
-  const statusRef2 = manager.query(queryRef)
+  manager.subscribe(queryRef1, listener1)
+  manager.subscribe(queryRef2, listener2)
 
-  expect(statusRef1).toBe(statusRef2)
+  expect(manager.subscriptions[queryRef1].listeners.length).toBe(2)
+
+  manager.unsubscribe(queryRef1, listener1)
+  manager.unsubscribe(queryRef2, listener2)
+
+  expect(manager.subscriptions[queryRef1]).toBeUndefined()
   done()
 })
 
-test('QueryManager.query(...) will return a different statusRef for an identical query if a new request needs to be made', async done => {
-  const account = { type: 'account', id: '1' }
+// test('QueryManager.unsubscribe(...) delete statuses object when there are no listeners left', async done => {
+//   const account = { type: 'account', id: '1' }
 
-  const query = { Account: (q: QueryBuilder) => q.findRecord(account) }
-  const queryRef = manager.generateQueryRef(query)
+//   const query = { Account: (q: QueryBuilder) => q.findRecord(account) }
 
-  await manager._store.update(t => t.addRecord(account))
+//   const queryRef = manager.registerQuery(query)
 
-  const statusRef1 = manager.query(queryRef)
+//   await manager._store.update(t => t.addRecord(account))
 
-  await new Promise(resolve => manager.subscribeToFetch(queryRef, resolve))
+//   const subscriptions = new Promise(resolve => {
+//     const listener = () => {
+//       resolve(manager.statuses[queryRef])
+//     }
 
-  const statusRef2 = manager.query(queryRef)
+//     manager.subscribe(queryRef, listener)
+//     manager.query(queryRef)
+//     expect(manager.statuses[queryRef]).toBeDefined()
 
-  expect(statusRef1).not.toBe(statusRef2)
-  done()
-})
+//     manager.unsubscribe(queryRef, listener)
+//   })
 
-test('QueryManager.unsubscribeFromCache(...) delete result object when there are no listeners left', async done => {
-  const account = { type: 'account', id: '1' }
+//   await subscriptions
 
-  const query = { Account: (q: QueryBuilder) => q.findRecord(account) }
-  const queryRef = manager.generateQueryRef(query)
-
-  await manager._store.update(t => t.addRecord(account))
-
-  manager.subscribeToCache(queryRef, () => { })
-  manager.subscribeToCache(queryRef, () => { })
-
-  expect(manager.subscriptions[queryRef].listeners).toBe(2)
-
-  manager.unsubscribeFromCache(queryRef)
-  manager.unsubscribeFromCache(queryRef)
-
-  expect(manager.subscriptions[queryRef]).toBeUndefined()
-  done()
-})
-
-test('QueryManager.unsubscribeFromStatus(...) delete statuses object when there are no listeners left', async done => {
-  const account = { type: 'account', id: '1' }
-
-  const query = { Account: (q: QueryBuilder) => q.findRecord(account) }
-  const queryRef = manager.generateQueryRef(query)
-
-  await manager._store.update(t => t.addRecord(account))
-
-  const statusRef = manager.query(queryRef)
-
-  manager.subscribeToStatus(statusRef)
-  manager.subscribeToStatus(statusRef)
-
-  expect(manager.statuses[statusRef].listeners).toBe(2)
-
-  manager.unsubscribeFromStatus(statusRef)
-  manager.unsubscribeFromStatus(statusRef)
-
-  expect(manager.statuses[statusRef]).toBeUndefined()
-  done()
-})
+//   expect(manager.statuses[queryRef]).toBeUndefined()
+//   done()
+// })
 
 test('QueryManager.queryCache(...) returns null if no match is found', () => {
   const account = { type: 'account', id: '1' }
 
   const query = { Account: (q: QueryBuilder) => q.findRecord(account) }
-  const queryRef = manager.generateQueryRef(query)
 
+  const queryRef = manager.registerQuery(query)
+
+  manager.subscribe(queryRef, () => { })
   manager.query(queryRef)
 
   const terms = manager.subscriptions[queryRef].terms
@@ -202,18 +145,20 @@ test('QueryManager.queryCache(...) returns an object when a match is found', asy
   const account = { type: 'account', id: '1' }
 
   const query = { Account: (q: QueryBuilder) => q.findRecord(account) }
-  const queryRef = manager.generateQueryRef(query)
-  const terms = manager.subscriptions[queryRef].terms
 
-  const subscription = new Promise((resolve) => manager.subscribeToCache(queryRef, resolve))
+  const queryRef = manager.registerQuery(query)
+
+
+  const result = new Promise((resolve) => {
+    const terms = manager.subscriptions[queryRef].terms
+    const listener = () => resolve(manager.queryCache(terms))
+
+    manager.subscribe(queryRef, listener)
+  })
 
   manager._store.update(t => t.addRecord(account))
 
-  await subscription
-
-  const result = manager.queryCache(terms)
-
-  expect(result).toMatchObject({ Account: account })
+  expect(await result).toMatchObject({ Account: account })
   done()
 })
 
@@ -221,11 +166,12 @@ test('QueryManager.queryCache(...) gets cancelled when beforeQuery returns true'
   const account = { type: 'account', id: '1' }
 
   const query = { Account: (q: QueryBuilder) => q.findRecord(account) }
-  const queryRef = manager.generateQueryRef(query)
+
+  const queryRef = manager.registerQuery(query)
   const terms = manager.subscriptions[queryRef].terms
 
   const result = new Promise((resolve) => {
-    manager.subscribeToCache(queryRef, () => {
+    manager.subscribe(queryRef, () => {
 
       const queryOptions = {
         beforeQuery: (expression: any, extensions: any) => {
@@ -249,12 +195,13 @@ test('QueryManager.queryCache(...) calls onQuery with the results', async done =
   const account = { type: 'account', id: '1' }
 
   const query = { Account: (q: QueryBuilder) => q.findRecord(account) }
-  const queryRef = manager.generateQueryRef(query)
+
+  const queryRef = manager.registerQuery(query)
   const terms = manager.subscriptions[queryRef].terms
 
   const result = new Promise((resolve) => {
     const queryOptions = { onQuery: resolve }
-    manager.subscribeToCache(queryRef, () => manager.queryCache(terms, queryOptions))
+    manager.subscribe(queryRef, () => manager.queryCache(terms, queryOptions))
   })
 
   manager._store.update(t => t.addRecord(account))
@@ -267,13 +214,14 @@ test('QueryManager.queryCache(...) calls onError when no matches are found', asy
   const account = { type: 'account', id: '1' }
 
   const query = { Account: (q: QueryBuilder) => q.findRecord(account) }
-  const queryRef = manager.generateQueryRef(query)
+
+  const queryRef = manager.registerQuery(query)
   const terms = manager.subscriptions[queryRef].terms
 
   await manager._store.update(t => t.addRecord(account))
 
   const result = new Promise((resolve) => {
-    manager.subscribeToCache(queryRef, () => {
+    manager.subscribe(queryRef, () => {
       const queryOptions = { onError: resolve }
       manager.queryCache(terms, queryOptions)
     })
@@ -290,45 +238,45 @@ describe('QueryManager._shouldUpdate(...)', () => {
     const term: Term = { key: 'Test', expression: { op: 'findRecords', type: 'account' } }
     const changedRecord = { type: 'account', id: '1' }
 
-    const shouldUpdate = manager._shouldUpdate([term], [changedRecord], [])
+    const shouldUpdateVal = shouldUpdate([term], [changedRecord], [])
 
-    expect(shouldUpdate).toBe(true)
+    expect(shouldUpdateVal).toBe(true)
   })
 
   test('findRecords: It should return true  when a record of the listened to type present in relatedRecords', () => {
     const term: Term = { key: 'Test', expression: { op: 'findRecords', type: 'account' } }
     const changedRelatedRecord = { type: 'account', id: '1' }
 
-    const shouldUpdate = manager._shouldUpdate([term], [], [changedRelatedRecord])
+    const shouldUpdateVal = shouldUpdate([term], [], [changedRelatedRecord])
 
-    expect(shouldUpdate).toBe(true)
+    expect(shouldUpdateVal).toBe(true)
   })
 
   test('It should return true with any other operation if a record matches an expression', () => {
     const term: Term = { key: 'Test', expression: { op: 'findRecord', record: { type: 'account', id: '1' } } }
     const changedRecord = { type: 'account', id: '1' }
 
-    const shouldUpdate = manager._shouldUpdate([term], [changedRecord], [])
+    const shouldUpdateVal = shouldUpdate([term], [changedRecord], [])
 
-    expect(shouldUpdate).toBe(true)
+    expect(shouldUpdateVal).toBe(true)
   })
 
   test('It should return true with any other operation if the type of a relatedRecord matches the expression (hasOne)', () => {
     const term: Term = { key: 'Test', expression: { op: 'findRecord', record: { type: 'account', id: '1' } } }
     const changedRelatedRecord = { type: 'account', id: '1' }
 
-    const shouldUpdate = manager._shouldUpdate([term], [], [changedRelatedRecord])
+    const shouldUpdateVal = shouldUpdate([term], [], [changedRelatedRecord])
 
-    expect(shouldUpdate).toBe(true)
+    expect(shouldUpdateVal).toBe(true)
   })
 
   test('It should return true with any other operation if the type of a relatedRecord matches the expression (hasMany)', () => {
     const term: Term = { key: 'Test', expression: { op: 'findRecord', record: { type: 'account', id: '1' } } }
     const changedRelatedRecord = { type: 'account', id: '1' }
 
-    const shouldUpdate = manager._shouldUpdate([term], [], [changedRelatedRecord])
+    const shouldUpdateVal = shouldUpdate([term], [], [changedRelatedRecord])
 
-    expect(shouldUpdate).toBe(true)
+    expect(shouldUpdateVal).toBe(true)
   })
 })
 
@@ -337,9 +285,10 @@ describe('Listener gets called after', () => {
     const account = { type: 'account', id: '1' }
 
     const query = { Account: (q: QueryBuilder) => q.findRecords('account') }
-    const queryRef = manager.generateQueryRef(query)
 
-    const result = new Promise(resolve => manager.subscribeToCache(queryRef, () => { resolve(' q(0_0)p ') }))
+    const queryRef = manager.registerQuery(query)
+
+    const result = new Promise(resolve => manager.subscribe(queryRef, () => { resolve(' q(0_0)p ') }))
 
     manager._store.update(t => t.addRecord(account))
 
@@ -351,11 +300,12 @@ describe('Listener gets called after', () => {
     const account = { type: 'account', id: '1' }
 
     const query = { Account: (q: QueryBuilder) => q.findRecords('account') }
-    const queryRef = manager.generateQueryRef(query)
+
+    const queryRef = manager.registerQuery(query)
 
     await manager._store.update(t => t.addRecord(account))
 
-    const result = new Promise(resolve => manager.subscribeToCache(queryRef, () => { resolve(' q(0_0)p ') }))
+    const result = new Promise(resolve => manager.subscribe(queryRef, () => { resolve(' q(0_0)p ') }))
 
     manager._store.update(t => t.replaceRecord(account))
 
@@ -367,11 +317,12 @@ describe('Listener gets called after', () => {
     const account = { type: 'account', id: '1' }
 
     const query = { Account: (q: QueryBuilder) => q.findRecords('account') }
-    const queryRef = manager.generateQueryRef(query)
+
+    const queryRef = manager.registerQuery(query)
 
     await manager._store.update(t => t.addRecord(account))
 
-    const result = new Promise(resolve => manager.subscribeToCache(queryRef, () => { resolve(' q(0_0)p ') }))
+    const result = new Promise(resolve => manager.subscribe(queryRef, () => { resolve(' q(0_0)p ') }))
 
     manager._store.update(t => t.removeRecord(account))
 
@@ -383,11 +334,12 @@ describe('Listener gets called after', () => {
     const account = { type: 'account', id: '1' }
 
     const query = { Account: (q: QueryBuilder) => q.findRecords('account') }
-    const queryRef = manager.generateQueryRef(query)
+
+    const queryRef = manager.registerQuery(query)
 
     await manager._store.update(t => t.addRecord(account))
 
-    const result = new Promise(resolve => manager.subscribeToCache(queryRef, () => { resolve(' q(0_0)p ') }))
+    const result = new Promise(resolve => manager.subscribe(queryRef, () => { resolve(' q(0_0)p ') }))
 
     manager._store.update(t => t.replaceKey(account, 'testKey', 'testValue'))
 
@@ -402,9 +354,10 @@ describe('Listener gets called after', () => {
 
     await manager._store.update(t => t.addRecord(account))
 
-    const queryRef = manager.generateQueryRef(query)
 
-    const result = new Promise(resolve => manager.subscribeToCache(queryRef, () => { resolve(' q(0_0)p ') }))
+    const queryRef = manager.registerQuery(query)
+
+    const result = new Promise(resolve => manager.subscribe(queryRef, () => { resolve(' q(0_0)p ') }))
 
     manager._store.update(t => t.replaceAttribute(account, 'test', 'hello'))
 
@@ -416,11 +369,12 @@ describe('Listener gets called after', () => {
     const account = { type: 'account', id: '1' }
 
     const query = { Account: (q: QueryBuilder) => q.findRecords('account') }
-    const queryRef = manager.generateQueryRef(query)
+
+    const queryRef = manager.registerQuery(query)
 
     await manager._store.update(t => [t.addRecord(account), t.addRecord({ type: 'service', id: '1' })])
 
-    const result = new Promise(resolve => manager.subscribeToCache(queryRef, () => { resolve(' q(0_0)p ') }))
+    const result = new Promise(resolve => manager.subscribe(queryRef, () => { resolve(' q(0_0)p ') }))
 
     manager._store.update(t => t.addToRelatedRecords(account, 'services', { type: 'service', id: '1' }))
 
@@ -433,11 +387,12 @@ describe('Listener gets called after', () => {
     const service = { type: 'service', id: '1' }
 
     const query = { Account: (q: QueryBuilder) => q.findRecords('account') }
-    const queryRef = manager.generateQueryRef(query)
+
+    const queryRef = manager.registerQuery(query)
 
     await manager._store.update(t => [t.addRecord(account), t.addRecord(service)])
 
-    const result = new Promise(resolve => manager.subscribeToCache(queryRef, () => { resolve(' q(0_0)p ') }))
+    const result = new Promise(resolve => manager.subscribe(queryRef, () => { resolve(' q(0_0)p ') }))
 
     manager._store.update(t => t.addToRelatedRecords(service, 'subscribers', account))
 
@@ -450,7 +405,8 @@ describe('Listener gets called after', () => {
     const service = { type: 'service', id: '1' }
 
     const query = { Account: (q: QueryBuilder) => q.findRecords('account') }
-    const queryRef = manager.generateQueryRef(query)
+
+    const queryRef = manager.registerQuery(query)
 
     await manager._store.update(t => [
       t.addRecord(account),
@@ -458,7 +414,7 @@ describe('Listener gets called after', () => {
       t.addToRelatedRecords(account, 'services', service)
     ])
 
-    const result = new Promise(resolve => manager.subscribeToCache(queryRef, () => { resolve(' q(0_0)p ') }))
+    const result = new Promise(resolve => manager.subscribe(queryRef, () => { resolve(' q(0_0)p ') }))
 
     manager._store.update(t => t.removeFromRelatedRecords(account, 'services', service))
 
@@ -471,7 +427,8 @@ describe('Listener gets called after', () => {
     const service = { type: 'service', id: '1' }
 
     const query = { Account: (q: QueryBuilder) => q.findRecords('account') }
-    const queryRef = manager.generateQueryRef(query)
+
+    const queryRef = manager.registerQuery(query)
 
     await manager._store.update(t => [
       t.addRecord(account),
@@ -479,7 +436,7 @@ describe('Listener gets called after', () => {
       t.addToRelatedRecords(service, 'subscribers', account)
     ])
 
-    const result = new Promise(resolve => manager.subscribeToCache(queryRef, () => { resolve(' q(0_0)p ') }))
+    const result = new Promise(resolve => manager.subscribe(queryRef, () => { resolve(' q(0_0)p ') }))
 
     manager._store.update(t => t.removeFromRelatedRecords(service, 'subscribers', account))
 
@@ -493,7 +450,8 @@ describe('Listener gets called after', () => {
     const service2 = { type: 'service', id: '2' }
 
     const query = { Account: (q: QueryBuilder) => q.findRecords('account') }
-    const queryRef = manager.generateQueryRef(query)
+
+    const queryRef = manager.registerQuery(query)
 
     await manager._store.update(t => [
       t.addRecord(account),
@@ -502,7 +460,7 @@ describe('Listener gets called after', () => {
       t.addToRelatedRecords(account, 'services', service1)
     ])
 
-    const result = new Promise(resolve => manager.subscribeToCache(queryRef, () => { resolve(' q(0_0)p ') }))
+    const result = new Promise(resolve => manager.subscribe(queryRef, () => { resolve(' q(0_0)p ') }))
 
     manager._store.update(t => t.replaceRelatedRecords(account, 'services', [service2]))
 
@@ -516,7 +474,8 @@ describe('Listener gets called after', () => {
     const service = { type: 'service', id: '1' }
 
     const query = { Account: (q: QueryBuilder) => q.findRecords('account') }
-    const queryRef = manager.generateQueryRef(query)
+
+    const queryRef = manager.registerQuery(query)
 
     await manager._store.update(t => [
       t.addRecord(account1),
@@ -525,7 +484,7 @@ describe('Listener gets called after', () => {
       t.addToRelatedRecords(service, 'subscribers', account1)
     ])
 
-    const result = new Promise(resolve => manager.subscribeToCache(queryRef, () => { resolve(' q(0_0)p ') }))
+    const result = new Promise(resolve => manager.subscribe(queryRef, () => { resolve(' q(0_0)p ') }))
 
     manager._store.update(t => t.replaceRelatedRecords(service, 'subscribers', [account2]))
 
@@ -539,7 +498,8 @@ describe('Listener gets called after', () => {
     const profile2 = { type: 'profile', id: '2' }
 
     const query = { Account: (q: QueryBuilder) => q.findRecords('account') }
-    const queryRef = manager.generateQueryRef(query)
+
+    const queryRef = manager.registerQuery(query)
 
     await manager._store.update(t => [
       t.addRecord(account),
@@ -548,7 +508,7 @@ describe('Listener gets called after', () => {
       t.replaceRelatedRecord(account, 'profile', profile1)
     ])
 
-    const result = new Promise(resolve => manager.subscribeToCache(queryRef, () => { resolve(' q(0_0)p ') }))
+    const result = new Promise(resolve => manager.subscribe(queryRef, () => { resolve(' q(0_0)p ') }))
 
     manager._store.update(t => t.replaceRelatedRecord(account, 'profile', profile2))
 
@@ -562,7 +522,8 @@ describe('Listener gets called after', () => {
     const profile = { type: 'profile', id: '1' }
 
     const query = { Account: (q: QueryBuilder) => q.findRecords('account') }
-    const queryRef = manager.generateQueryRef(query)
+
+    const queryRef = manager.registerQuery(query)
 
     await manager._store.update(t => [
       t.addRecord(account1),
@@ -571,7 +532,7 @@ describe('Listener gets called after', () => {
       t.replaceRelatedRecord(profile, 'account', account2)
     ])
 
-    const result = new Promise(resolve => manager.subscribeToCache(queryRef, () => { resolve(' q(0_0)p ') }))
+    const result = new Promise(resolve => manager.subscribe(queryRef, () => { resolve(' q(0_0)p ') }))
 
     manager._store.update(t => t.replaceRelatedRecord(profile, 'account', account2))
 
@@ -583,9 +544,10 @@ describe('Listener gets called after', () => {
     const account = { type: 'account', id: '1' }
 
     const query = { Account: (q: QueryBuilder) => q.findRecord(account) }
-    const queryRef = manager.generateQueryRef(query)
 
-    const result = new Promise(resolve => manager.subscribeToCache(queryRef, () => { resolve(' q(0_0)p ') }))
+    const queryRef = manager.registerQuery(query)
+
+    const result = new Promise(resolve => manager.subscribe(queryRef, () => { resolve(' q(0_0)p ') }))
 
     manager._store.update(t => t.addRecord(account))
 
@@ -597,11 +559,12 @@ describe('Listener gets called after', () => {
     const account = { type: 'account', id: '1' }
 
     const query = { Account: (q: QueryBuilder) => q.findRecord(account) }
-    const queryRef = manager.generateQueryRef(query)
+
+    const queryRef = manager.registerQuery(query)
 
     await manager._store.update(t => t.addRecord(account))
 
-    const result = new Promise(resolve => manager.subscribeToCache(queryRef, () => { resolve(' q(0_0)p ') }))
+    const result = new Promise(resolve => manager.subscribe(queryRef, () => { resolve(' q(0_0)p ') }))
 
     manager._store.update(t => t.replaceRecord(account))
 
@@ -613,11 +576,12 @@ describe('Listener gets called after', () => {
     const account = { type: 'account', id: '1' }
 
     const query = { Account: (q: QueryBuilder) => q.findRecord(account) }
-    const queryRef = manager.generateQueryRef(query)
+
+    const queryRef = manager.registerQuery(query)
 
     await manager._store.update(t => t.addRecord(account))
 
-    const result = new Promise(resolve => manager.subscribeToCache(queryRef, () => { resolve(' q(0_0)p ') }))
+    const result = new Promise(resolve => manager.subscribe(queryRef, () => { resolve(' q(0_0)p ') }))
 
     manager._store.update(t => t.removeRecord(account))
 
@@ -629,11 +593,12 @@ describe('Listener gets called after', () => {
     const account = { type: 'account', id: '1' }
 
     const query = { Account: (q: QueryBuilder) => q.findRecord(account) }
-    const queryRef = manager.generateQueryRef(query)
+
+    const queryRef = manager.registerQuery(query)
 
     await manager._store.update(t => t.addRecord(account))
 
-    const result = new Promise(resolve => manager.subscribeToCache(queryRef, () => { resolve(' q(0_0)p ') }))
+    const result = new Promise(resolve => manager.subscribe(queryRef, () => { resolve(' q(0_0)p ') }))
 
     manager._store.update(t => t.replaceKey(account, 'testKey', 'testValue'))
 
@@ -645,11 +610,12 @@ describe('Listener gets called after', () => {
     const account = { type: 'account', id: '1' }
 
     const query = { Account: (q: QueryBuilder) => q.findRecord(account) }
-    const queryRef = manager.generateQueryRef(query)
+
+    const queryRef = manager.registerQuery(query)
 
     await manager._store.update(t => t.addRecord(account))
 
-    const result = new Promise(resolve => manager.subscribeToCache(queryRef, () => { resolve(' q(0_0)p ') }))
+    const result = new Promise(resolve => manager.subscribe(queryRef, () => { resolve(' q(0_0)p ') }))
 
     manager._store.update(t => t.replaceAttribute(account, 'test', 'hello'))
 
@@ -662,11 +628,12 @@ describe('Listener gets called after', () => {
     const service = { type: 'service', id: '1' }
 
     const query = { Account: (q: QueryBuilder) => q.findRecord(account) }
-    const queryRef = manager.generateQueryRef(query)
+
+    const queryRef = manager.registerQuery(query)
 
     await manager._store.update(t => [t.addRecord(account), t.addRecord(service)])
 
-    const result = new Promise(resolve => manager.subscribeToCache(queryRef, () => { resolve(' q(0_0)p ') }))
+    const result = new Promise(resolve => manager.subscribe(queryRef, () => { resolve(' q(0_0)p ') }))
 
     manager._store.update(t => t.addToRelatedRecords(account, 'services', service))
 
@@ -679,11 +646,12 @@ describe('Listener gets called after', () => {
     const service = { type: 'service', id: '1' }
 
     const query = { Account: (q: QueryBuilder) => q.findRecord(account) }
-    const queryRef = manager.generateQueryRef(query)
+
+    const queryRef = manager.registerQuery(query)
 
     await manager._store.update(t => [t.addRecord(account), t.addRecord(service)])
 
-    const result = new Promise(resolve => manager.subscribeToCache(queryRef, () => { resolve(' q(0_0)p ') }))
+    const result = new Promise(resolve => manager.subscribe(queryRef, () => { resolve(' q(0_0)p ') }))
 
     manager._store.update(t => t.addToRelatedRecords(service, 'subscribers', account))
 
@@ -696,7 +664,8 @@ describe('Listener gets called after', () => {
     const service = { type: 'service', id: '1' }
 
     const query = { Account: (q: QueryBuilder) => q.findRecord(account) }
-    const queryRef = manager.generateQueryRef(query)
+
+    const queryRef = manager.registerQuery(query)
 
     await manager._store.update(t => [
       t.addRecord(account),
@@ -704,7 +673,7 @@ describe('Listener gets called after', () => {
       t.addToRelatedRecords(account, 'services', service)
     ])
 
-    const result = new Promise(resolve => manager.subscribeToCache(queryRef, () => { resolve(' q(0_0)p ') }))
+    const result = new Promise(resolve => manager.subscribe(queryRef, () => { resolve(' q(0_0)p ') }))
 
     manager._store.update(t => t.removeFromRelatedRecords(account, 'services', service))
 
@@ -717,7 +686,8 @@ describe('Listener gets called after', () => {
     const service = { type: 'service', id: '1' }
 
     const query = { Account: (q: QueryBuilder) => q.findRecord(account) }
-    const queryRef = manager.generateQueryRef(query)
+
+    const queryRef = manager.registerQuery(query)
 
     await manager._store.update(t => [
       t.addRecord(account),
@@ -725,7 +695,7 @@ describe('Listener gets called after', () => {
       t.addToRelatedRecords(service, 'subscribers', account)
     ])
 
-    const result = new Promise(resolve => manager.subscribeToCache(queryRef, () => { resolve(' q(0_0)p ') }))
+    const result = new Promise(resolve => manager.subscribe(queryRef, () => { resolve(' q(0_0)p ') }))
 
     manager._store.update(t => t.removeFromRelatedRecords(service, 'subscribers', account))
 
@@ -739,7 +709,8 @@ describe('Listener gets called after', () => {
     const service2 = { type: 'service', id: '2' }
 
     const query = { Account: (q: QueryBuilder) => q.findRecord(account) }
-    const queryRef = manager.generateQueryRef(query)
+
+    const queryRef = manager.registerQuery(query)
 
     await manager._store.update(t => [
       t.addRecord(account),
@@ -748,7 +719,7 @@ describe('Listener gets called after', () => {
       t.addToRelatedRecords(account, 'services', service1)
     ])
 
-    const result = new Promise(resolve => manager.subscribeToCache(queryRef, () => { resolve(' q(0_0)p ') }))
+    const result = new Promise(resolve => manager.subscribe(queryRef, () => { resolve(' q(0_0)p ') }))
 
     manager._store.update(t => t.replaceRelatedRecords(account, 'services', [service2]))
 
@@ -762,7 +733,8 @@ describe('Listener gets called after', () => {
     const service = { type: 'service', id: '2' }
 
     const query = { Account: (q: QueryBuilder) => q.findRecord(account1) }
-    const queryRef = manager.generateQueryRef(query)
+
+    const queryRef = manager.registerQuery(query)
 
     await manager._store.update(t => [
       t.addRecord(account1),
@@ -771,7 +743,7 @@ describe('Listener gets called after', () => {
       t.addToRelatedRecords(service, 'subscribers', account1)
     ])
 
-    const result = new Promise(resolve => manager.subscribeToCache(queryRef, () => { resolve(' q(0_0)p ') }))
+    const result = new Promise(resolve => manager.subscribe(queryRef, () => { resolve(' q(0_0)p ') }))
 
     manager._store.update(t => t.replaceRelatedRecords(service, 'subscribers', [account2]))
 
@@ -785,7 +757,8 @@ describe('Listener gets called after', () => {
     const profile2 = { type: 'profile', id: '2' }
 
     const query = { Account: (q: QueryBuilder) => q.findRecord(account) }
-    const queryRef = manager.generateQueryRef(query)
+
+    const queryRef = manager.registerQuery(query)
 
     await manager._store.update(t => [
       t.addRecord(account),
@@ -794,7 +767,7 @@ describe('Listener gets called after', () => {
       t.replaceRelatedRecord(account, 'profile', profile1)
     ])
 
-    const result = new Promise(resolve => manager.subscribeToCache(queryRef, () => { resolve(' q(0_0)p ') }))
+    const result = new Promise(resolve => manager.subscribe(queryRef, () => { resolve(' q(0_0)p ') }))
 
     manager._store.update(t => t.replaceRelatedRecord(account, 'profile', profile2))
 
@@ -808,7 +781,8 @@ describe('Listener gets called after', () => {
     const profile = { type: 'profile', id: '1' }
 
     const query = { Account: (q: QueryBuilder) => q.findRecord(account1) }
-    const queryRef = manager.generateQueryRef(query)
+
+    const queryRef = manager.registerQuery(query)
 
     await manager._store.update(t => [
       t.addRecord(account1),
@@ -817,7 +791,7 @@ describe('Listener gets called after', () => {
       t.replaceRelatedRecord(profile, 'account', account1)
     ])
 
-    const result = new Promise(resolve => manager.subscribeToCache(queryRef, () => { resolve(' q(0_0)p ') }))
+    const result = new Promise(resolve => manager.subscribe(queryRef, () => { resolve(' q(0_0)p ') }))
 
     manager._store.update(t => t.replaceRelatedRecord(profile, 'account', account2))
 
