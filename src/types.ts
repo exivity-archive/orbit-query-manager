@@ -21,13 +21,15 @@ export interface QueryCacheOptions<E> {
   onError?: OnErrorCallback<E>
 }
 
+export interface SubscribeOptions { listenerLabel?: string }
+
 export type Queries = { [key: string]: (q: QueryBuilder) => QueryTerm }
 
 export type Expressions = FindRecord | FindRelatedRecord | FindRecords | FindRelatedRecords
 
 export type Term = { key: string, expression: Expressions }
 
-export type Listener = () => void
+export type Listener = (() => void) & { label?: string }
 
 export interface RecordObject {
   [key: string]: Record

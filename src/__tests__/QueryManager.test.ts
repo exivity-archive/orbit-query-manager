@@ -58,7 +58,19 @@ test('QueryManager._extractTerms(...) returns an ordered array of terms', () => 
   ])
 })
 
-test('QueryManager.subscribeToFetch(...) subscribes you to the request being made', async done => {
+test('QueryManager.registerQuery(...) creates a new subscription when called for the first time and a queryRef to access it', async done => {
+  const account = { type: 'account', id: '1' }
+
+  const query = { Account: (q: QueryBuilder) => q.findRecord(account) }
+
+  const queryRef = manager.registerQuery(query)
+
+  expect(queryRef).toBeDefined()
+  expect(manager.subscriptions[queryRef]).toBeDefined()
+  done()
+})
+
+test('QueryManager.subscribe(...) subscribes you to changes in the cache in records you\'re listening to', async done => {
   const account = { type: 'account', id: '1' }
 
   const query = { Account: (q: QueryBuilder) => q.findRecord(account) }
@@ -98,32 +110,33 @@ test('QueryManager.unsubscribe(...) delete result object when there are no liste
   done()
 })
 
-// test('QueryManager.unsubscribe(...) delete statuses object when there are no listeners left', async done => {
-//   const account = { type: 'account', id: '1' }
+test('QueryManager.unsubscribe(...) delete statuses object when there are no listeners left', async done => {
+  const account = { type: 'account', id: '1' }
 
-//   const query = { Account: (q: QueryBuilder) => q.findRecord(account) }
+  const query = { Account: (q: QueryBuilder) => q.findRecord(account) }
 
-//   const queryRef = manager.registerQuery(query)
+  const queryRef = manager.registerQuery(query)
 
-//   await manager._store.update(t => t.addRecord(account))
+  const listener = () => { }
+  listener.label = 'test'
 
-//   const subscriptions = new Promise(resolve => {
-//     const listener = () => {
-//       resolve(manager.statuses[queryRef])
-//     }
+  await manager._store.update(t => t.addRecord(account))
 
-//     manager.subscribe(queryRef, listener)
-//     manager.query(queryRef)
-//     expect(manager.statuses[queryRef]).toBeDefined()
+  const subscriptions = new Promise(resolve => {
+    manager.subscribe(queryRef, resolve, { listenerLabel: 'test' })
+  })
 
-//     manager.unsubscribe(queryRef, listener)
-//   })
+  manager.query(queryRef)
 
-//   await subscriptions
+  expect(manager.statuses[queryRef]).toBeDefined()
 
-//   expect(manager.statuses[queryRef]).toBeUndefined()
-//   done()
-// })
+  await subscriptions
+
+  manager.unsubscribe(queryRef, listener)
+
+  expect(manager.statuses[queryRef]).toBeUndefined()
+  done()
+})
 
 test('QueryManager.queryCache(...) returns null if no match is found', () => {
   const account = { type: 'account', id: '1' }
@@ -171,15 +184,14 @@ test('QueryManager.queryCache(...) gets cancelled when beforeQuery returns true'
   const terms = manager.subscriptions[queryRef].terms
 
   const result = new Promise((resolve) => {
-    manager.subscribe(queryRef, () => {
-
-      const queryOptions = {
-        beforeQuery: (expression: any, extensions: any) => {
-          // extensions.skip: ['account'] as defined at the top of the file
-          if (extensions.skip.includes((expression as FindRecord).record.type)) return true
-        }
+    const queryOptions = {
+      beforeQuery: (expression: any, extensions: any) => {
+        // extensions.skip: ['account'] as defined at the top of the file
+        if (extensions.skip.includes((expression as FindRecord).record.type)) return true
       }
+    }
 
+    manager.subscribe(queryRef, () => {
       resolve(manager.queryCache(terms, queryOptions)
       )
     })
@@ -231,53 +243,6 @@ test('QueryManager.queryCache(...) calls onError when no matches are found', asy
 
   expect(await result).toBeDefined()
   done()
-})
-
-describe('QueryManager._shouldUpdate(...)', () => {
-  test('findRecords: It should return true when a record of the listened to type present in records', () => {
-    const term: Term = { key: 'Test', expression: { op: 'findRecords', type: 'account' } }
-    const changedRecord = { type: 'account', id: '1' }
-
-    const shouldUpdateVal = shouldUpdate([term], [changedRecord], [])
-
-    expect(shouldUpdateVal).toBe(true)
-  })
-
-  test('findRecords: It should return true  when a record of the listened to type present in relatedRecords', () => {
-    const term: Term = { key: 'Test', expression: { op: 'findRecords', type: 'account' } }
-    const changedRelatedRecord = { type: 'account', id: '1' }
-
-    const shouldUpdateVal = shouldUpdate([term], [], [changedRelatedRecord])
-
-    expect(shouldUpdateVal).toBe(true)
-  })
-
-  test('It should return true with any other operation if a record matches an expression', () => {
-    const term: Term = { key: 'Test', expression: { op: 'findRecord', record: { type: 'account', id: '1' } } }
-    const changedRecord = { type: 'account', id: '1' }
-
-    const shouldUpdateVal = shouldUpdate([term], [changedRecord], [])
-
-    expect(shouldUpdateVal).toBe(true)
-  })
-
-  test('It should return true with any other operation if the type of a relatedRecord matches the expression (hasOne)', () => {
-    const term: Term = { key: 'Test', expression: { op: 'findRecord', record: { type: 'account', id: '1' } } }
-    const changedRelatedRecord = { type: 'account', id: '1' }
-
-    const shouldUpdateVal = shouldUpdate([term], [], [changedRelatedRecord])
-
-    expect(shouldUpdateVal).toBe(true)
-  })
-
-  test('It should return true with any other operation if the type of a relatedRecord matches the expression (hasMany)', () => {
-    const term: Term = { key: 'Test', expression: { op: 'findRecord', record: { type: 'account', id: '1' } } }
-    const changedRelatedRecord = { type: 'account', id: '1' }
-
-    const shouldUpdateVal = shouldUpdate([term], [], [changedRelatedRecord])
-
-    expect(shouldUpdateVal).toBe(true)
-  })
 })
 
 describe('Listener gets called after', () => {

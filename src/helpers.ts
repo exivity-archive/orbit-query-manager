@@ -1,4 +1,4 @@
-import { RecordIdentity } from '@orbit/data'
+import { RecordIdentity, RecordOperation } from '@orbit/data'
 import { Term } from './types';
 
 export const identityIsEqual = (a: RecordIdentity | null, b: RecordIdentity | null) =>
@@ -19,4 +19,27 @@ export const shouldUpdate = (
       // @todo find a way to check for identity for relationships
       || relatedRecords.some(record => record.type === expression.record.type)
   })
+}
+
+export const getUpdatedRecords = (operations: RecordOperation[]) => {
+  const records: RecordIdentity[] = []
+  const relatedRecords: RecordIdentity[] = []
+
+  operations.forEach(operation => {
+    operation && operation.record && records.push(operation.record)
+
+    switch (operation.op) {
+      case 'addToRelatedRecords':
+      case 'removeFromRelatedRecords':
+      case 'replaceRelatedRecord':
+        operation.relatedRecord && relatedRecords.push(operation.relatedRecord)
+        break
+
+      case 'replaceRelatedRecords':
+        operation.relatedRecords.forEach(record => relatedRecords.push(record))
+        break
+    }
+  })
+
+  return { records, relatedRecords }
 }
