@@ -8,19 +8,18 @@ import {
   Queries,
   Subscriptions,
   Statuses,
-  QueryCacheOptions,
+  EventCallbacks,
   Listener,
-  SubscribeOptions,
 } from './types'
 import { Transform, RecordOperation } from '@orbit/data'
-import { shouldUpdate, getUpdatedRecords, generateLabel } from './helpers'
+import { shouldUpdate, getUpdatedRecords, filterByLabel, addLabel } from './helpers'
 
 export class QueryManager<E extends { [key: string]: any } = any>  {
   _extensions: E
   _store: Store
   _ongoingQueries: OngoingQueries
 
-  subscriptions: Subscriptions
+  subscriptions: Subscriptions<E>
   statuses: Statuses
 
   constructor (orbitStore: Store, extensions?: E) {
@@ -32,14 +31,32 @@ export class QueryManager<E extends { [key: string]: any } = any>  {
     this.statuses = {}
   }
 
-  registerQuery (queries: Queries) {
+  registerQuery (queries: Queries, { beforeQuery, onQuery, onError }: EventCallbacks<E> = {}) {
     const terms = this._extractTerms(queries)
     const queryRef = JSON.stringify(terms)
 
     if (!this.subscriptions[queryRef]) {
-      this.subscriptions[queryRef] = { listeners: [], terms }
+      this.subscriptions[queryRef] = { listeners: [], terms, beforeQueries: [], onQueries: [], onErrors: [] }
+      this.statuses[queryRef] = { error: null, loading: false, records: null }
       this._store.on('transform', this._compare.bind(this, queryRef))
+      this._queryCache(queryRef)
     }
+
+    if (beforeQuery) {
+      addLabel(this.subscriptions[queryRef].beforeQueries, beforeQuery, 'beforeQuery')
+      this.subscriptions[queryRef].beforeQueries.push(beforeQuery)
+    }
+
+    if (onQuery) {
+      addLabel(this.subscriptions[queryRef].onQueries, onQuery, 'onQuery')
+      this.subscriptions[queryRef].onQueries.push(onQuery)
+    }
+
+    if (onError) {
+      addLabel(this.subscriptions[queryRef].onErrors, onError, 'onError')
+      this.subscriptions[queryRef].onErrors.push(onError)
+    }
+
     return queryRef
   }
 
@@ -49,30 +66,38 @@ export class QueryManager<E extends { [key: string]: any } = any>  {
     )
   }
 
-  subscribe (queryRef: string, listener: () => void, options: SubscribeOptions = {}) {
-    this._labelListener(queryRef, listener, options.listenerLabel)
+  subscribe (queryRef: string, listener: Listener) {
+    if (!listener.label) {
+      addLabel(this.subscriptions[queryRef].listeners, listener, 'listener')
+    }
     this.subscriptions[queryRef].listeners.push(listener)
   }
 
-  _labelListener (queryRef: string, listener: Listener, label?: string) {
-    if (label) {
-      listener.label = label
-    } else {
-      listener.label = generateLabel(this.subscriptions[queryRef].listeners)
-    }
-  }
-
-  unsubscribe (queryRef: string, listener: Listener) {
+  unsubscribe (queryRef: string, listener: Listener, eventCallbacks: EventCallbacks<E> = {}) {
     if (this._ongoingQueries[queryRef]) {
-      this._ongoingQueries[queryRef].afterRequestQueue.push(() => this._unsubscribe(queryRef, listener))
+      this._ongoingQueries[queryRef].afterRequestQueue.push(() => this._unsubscribe(queryRef, listener, eventCallbacks))
     } else {
-      this._unsubscribe(queryRef, listener)
+      this._unsubscribe(queryRef, listener, eventCallbacks)
     }
   }
 
-  _unsubscribe (queryRef: string, listener: Listener) {
+  _unsubscribe (queryRef: string, listener: Listener, { beforeQuery, onQuery, onError }: EventCallbacks<E>) {
     this.subscriptions[queryRef].listeners =
-      this.subscriptions[queryRef].listeners.filter(item => item.label !== listener.label)
+      filterByLabel(this.subscriptions[queryRef].listeners, listener.label)
+
+    const { beforeQueries, onQueries, onErrors } = this.subscriptions[queryRef]
+
+    if (beforeQuery) {
+      this.subscriptions[queryRef].beforeQueries = filterByLabel(beforeQueries, beforeQuery.label)
+    }
+
+    if (onQuery) {
+      this.subscriptions[queryRef].onQueries = filterByLabel(onQueries, onQuery.label)
+    }
+
+    if (onError) {
+      this.subscriptions[queryRef].onErrors = filterByLabel(onErrors, onError.label)
+    }
 
     if (this.subscriptions[queryRef].listeners.length === 0) {
       delete this.subscriptions[queryRef]
@@ -102,7 +127,7 @@ export class QueryManager<E extends { [key: string]: any } = any>  {
         })
       )
 
-    this.statuses[queryRef] = { error: null, loading: true }
+    this.statuses[queryRef].loading = true
 
     this._ongoingQueries[queryRef] = { afterRequestQueue: [], request: queries }
 
@@ -126,31 +151,23 @@ export class QueryManager<E extends { [key: string]: any } = any>  {
       })
   }
 
-  queryCache (terms: Term[], { beforeQuery, onQuery, onError }: QueryCacheOptions<E> = {}): RecordObject | null {
-    let cancel = false
-    if (beforeQuery) {
-      for (let i = 0; i < terms.length; i++) {
-        const result = beforeQuery(terms[i].expression, this._extensions)
-        if (result === true) {
-          cancel = true
-          break
-        }
-      }
+  _queryCache (queryRef: string) {
+
+    const terms = this.subscriptions[queryRef].terms
+    this.subscriptions[queryRef].beforeQueries.forEach(beforeQuery => beforeQuery(terms, this._extensions))
+
+    try {
+      const res = terms.map(({ key, expression }) => ({ [key]: this._store.cache.query(expression) }))
+        .reduce((acc, result) => ({ ...acc, ...result }), {})
+
+      this.subscriptions[queryRef].onQueries.forEach(onQuery => onQuery(res, this._extensions))
+      this.statuses[queryRef].records = res
+      return
+    } catch (err) {
+      this.subscriptions[queryRef].onErrors.forEach(onError => onError(err, this._extensions))
     }
 
-    if (!cancel) {
-      try {
-        const res = terms.map(({ key, expression }) => ({ [key]: this._store.cache.query(expression) }))
-          .reduce((acc, result) => ({ ...acc, ...result }), {})
-
-        onQuery && onQuery(res, this._extensions)
-        return res
-      } catch (err) {
-        onError && onError(err, this._extensions)
-      }
-    }
-
-    return null
+    this.statuses[queryRef].records = null
   }
 
   _compare (queryRef: string, transform: Transform) {
@@ -158,6 +175,7 @@ export class QueryManager<E extends { [key: string]: any } = any>  {
     const terms = this.subscriptions[queryRef].terms
 
     if (shouldUpdate(terms, records, relatedRecords)) {
+      this._queryCache(queryRef)
       this.subscriptions[queryRef].listeners.forEach(listener => listener())
     }
   }

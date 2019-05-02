@@ -2,20 +2,19 @@ import {
   Record,
   QueryBuilder,
   QueryTerm,
-  QueryExpression,
   FindRecord,
   FindRelatedRecord,
   FindRecords,
   FindRelatedRecords
 } from '@orbit/data'
 
-export type BeforeCallback<E extends {}> = (expression: QueryExpression, extensions: Readonly<E>) => boolean | void
+export type BeforeCallback<E extends {}> = ((expression: Term[], extensions: Readonly<E>) => boolean | void) & { label?: string }
 
-export type OnCallback<E extends {}> = (records: RecordObject, extensions: Readonly<E>) => void
+export type OnCallback<E extends {}> = ((records: RecordObject, extensions: Readonly<E>) => void) & { label?: string }
 
-export type OnErrorCallback<E extends {}> = (error: Error, extensions: Readonly<E>) => void
+export type OnErrorCallback<E extends {}> = ((error: Error, extensions: Readonly<E>) => void) & { label?: string }
 
-export interface QueryCacheOptions<E> {
+export interface EventCallbacks<E> {
   beforeQuery?: BeforeCallback<E>
   onQuery?: OnCallback<E>
   onError?: OnErrorCallback<E>
@@ -43,19 +42,23 @@ export interface OngoingQueries {
 }
 
 export interface Status {
-  error: null | Error,
-  loading: boolean,
+  error: null | Error
+  loading: boolean
+  records: RecordObject | null
 }
 
 export interface Statuses {
   [key: string]: Status
 }
 
-export interface Subscription {
+export interface Subscription<E> {
   terms: Term[]
   listeners: Listener[]
+  beforeQueries: BeforeCallback<E>[]
+  onQueries: OnCallback<E>[]
+  onErrors: OnErrorCallback<E>[]
 }
 
-export interface Subscriptions {
-  [key: string]: Subscription
+export interface Subscriptions<E> {
+  [key: string]: Subscription<E>
 }

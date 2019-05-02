@@ -44,13 +44,18 @@ export const getUpdatedRecords = (operations: RecordOperation[]) => {
   return { records, relatedRecords }
 }
 
-export const generateLabel = (listeners: Listener[]) => {
+export const addLabel = (objects: ({ label?: string })[], item: { label?: string }, prefix: string) => {
   let i = 1
   while (true) {
-    const currentLabel = `listener_${i}`
-    if (!listeners.some(listener => listener.label === currentLabel)) {
-      return currentLabel
+    const currentLabel = `${prefix}_${i}`
+    if (!objects.some(listener => listener.label === currentLabel)) {
+      item.label = currentLabel
+      break
     }
     i++
   }
+}
+
+export const filterByLabel = <T extends { label?: string }> (arr: T[], label: string) => {
+  return arr.filter((item) => item.label !== label)
 }
