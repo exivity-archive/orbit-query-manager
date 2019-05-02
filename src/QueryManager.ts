@@ -12,7 +12,7 @@ import {
   Listener,
 } from './types'
 import { Transform, RecordOperation } from '@orbit/data'
-import { shouldUpdate, getUpdatedRecords, filterByLabel, addLabel } from './helpers'
+import { shouldUpdate, getUpdatedRecords } from './helpers'
 
 export class QueryManager<E extends { [key: string]: any } = any>  {
   _extensions: E
@@ -42,20 +42,9 @@ export class QueryManager<E extends { [key: string]: any } = any>  {
       this._queryCache(queryRef)
     }
 
-    if (beforeQuery) {
-      addLabel(this.subscriptions[queryRef].beforeQueries, beforeQuery, 'beforeQuery')
-      this.subscriptions[queryRef].beforeQueries.push(beforeQuery)
-    }
-
-    if (onQuery) {
-      addLabel(this.subscriptions[queryRef].onQueries, onQuery, 'onQuery')
-      this.subscriptions[queryRef].onQueries.push(onQuery)
-    }
-
-    if (onError) {
-      addLabel(this.subscriptions[queryRef].onErrors, onError, 'onError')
-      this.subscriptions[queryRef].onErrors.push(onError)
-    }
+    beforeQuery && this.subscriptions[queryRef].beforeQueries.push(beforeQuery)
+    onQuery && this.subscriptions[queryRef].onQueries.push(onQuery)
+    onError && this.subscriptions[queryRef].onErrors.push(onError)
 
     return queryRef
   }
@@ -67,9 +56,6 @@ export class QueryManager<E extends { [key: string]: any } = any>  {
   }
 
   subscribe (queryRef: string, listener: Listener) {
-    if (!listener.label) {
-      addLabel(this.subscriptions[queryRef].listeners, listener, 'listener')
-    }
     this.subscriptions[queryRef].listeners.push(listener)
   }
 
@@ -83,20 +69,21 @@ export class QueryManager<E extends { [key: string]: any } = any>  {
 
   _unsubscribe (queryRef: string, listener: Listener, { beforeQuery, onQuery, onError }: EventCallbacks<E>) {
     this.subscriptions[queryRef].listeners =
-      filterByLabel(this.subscriptions[queryRef].listeners, listener.label)
-
-    const { beforeQueries, onQueries, onErrors } = this.subscriptions[queryRef]
+      this.subscriptions[queryRef].listeners.filter(item => item !== listener)
 
     if (beforeQuery) {
-      this.subscriptions[queryRef].beforeQueries = filterByLabel(beforeQueries, beforeQuery.label)
+      this.subscriptions[queryRef].beforeQueries =
+        this.subscriptions[queryRef].beforeQueries.filter(item => item !== beforeQuery)
     }
 
     if (onQuery) {
-      this.subscriptions[queryRef].onQueries = filterByLabel(onQueries, onQuery.label)
+      this.subscriptions[queryRef].onQueries =
+        this.subscriptions[queryRef].onQueries.filter(item => item !== onQuery)
     }
 
     if (onError) {
-      this.subscriptions[queryRef].onErrors = filterByLabel(onErrors, onError.label)
+      this.subscriptions[queryRef].onErrors =
+        this.subscriptions[queryRef].onErrors.filter(item => item !== onError)
     }
 
     if (this.subscriptions[queryRef].listeners.length === 0) {
