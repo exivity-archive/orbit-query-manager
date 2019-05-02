@@ -63,7 +63,7 @@ test('QueryManager.registerQuery(...) creates a new subscription when called for
   const queryRef = manager.subscribe(query)
 
   expect(queryRef).toBeDefined()
-  expect(manager.subscriptions[queryRef]).toBeDefined()
+  expect(manager._subscriptions[queryRef]).toBeDefined()
   expect(manager.statuses[queryRef]).toBeDefined()
   done()
 })
@@ -132,11 +132,11 @@ test('QueryManager.unsubscribe(...) delete result object when there are no liste
 
   const queryRef = manager.subscribe(query)
 
-  expect(manager.subscriptions[queryRef].subscriberCount).toBe(1)
+  expect(manager._subscriptions[queryRef].subscriberCount).toBe(1)
 
   manager.unsubscribe(queryRef)
 
-  expect(manager.subscriptions[queryRef]).toBeUndefined()
+  expect(manager._subscriptions[queryRef]).toBeUndefined()
   done()
 })
 
@@ -170,13 +170,13 @@ test('QueryManager.unsubscribe(...) waits for ongoing query to be done before de
   manager.unsubscribe(queryRef)
 
   expect(manager.statuses[queryRef]).toBeDefined()
-  expect(manager.subscriptions[queryRef]).toBeDefined()
+  expect(manager._subscriptions[queryRef]).toBeDefined()
   expect(manager._ongoingQueries[queryRef]).toBeDefined()
 
   await Promise.all(manager._ongoingQueries[queryRef].request)
 
   expect(manager.statuses[queryRef]).toBeUndefined()
-  expect(manager.subscriptions[queryRef]).toBeUndefined()
+  expect(manager._subscriptions[queryRef]).toBeUndefined()
   expect(manager._ongoingQueries[queryRef]).toBeUndefined()
   done()
 })
