@@ -8,8 +8,7 @@ import {
   Queries,
   Subscriptions,
   Statuses,
-  EventCallbacks,
-  Listener,
+  EventCallbacks
 } from './types'
 import { Transform, RecordOperation } from '@orbit/data'
 import { shouldUpdate, getUpdatedRecords } from './helpers'
@@ -31,62 +30,65 @@ export class QueryManager<E extends { [key: string]: any } = any>  {
     this.statuses = {}
   }
 
-  registerQuery (queries: Queries, { beforeQuery, onQuery, onError }: EventCallbacks<E> = {}) {
-    const terms = this._extractTerms(queries)
-    const queryRef = JSON.stringify(terms)
-
-    if (!this.subscriptions[queryRef]) {
-      this.subscriptions[queryRef] = { listeners: [], terms, beforeQueries: [], onQueries: [], onErrors: [] }
-      this.statuses[queryRef] = { error: null, loading: false, records: null }
-      this._store.on('transform', this._compare.bind(this, queryRef))
-      this._queryCache(queryRef)
-    }
-
-    beforeQuery && this.subscriptions[queryRef].beforeQueries.push(beforeQuery)
-    onQuery && this.subscriptions[queryRef].onQueries.push(onQuery)
-    onError && this.subscriptions[queryRef].onErrors.push(onError)
-
-    return queryRef
-  }
-
   _extractTerms (queries: Queries): Term[] {
     return Object.keys(queries).sort().map(
       (key) => ({ key, expression: queries[key](this._store.queryBuilder).expression as Expressions })
     )
   }
 
-  subscribe (queryRef: string, listener: Listener) {
-    this.subscriptions[queryRef].listeners.push(listener)
+  subscribe (queries: Queries, { beforeQuery, onQuery, onError, listener }: EventCallbacks<E> = {}) {
+    const terms = this._extractTerms(queries)
+    const queryRef = JSON.stringify(terms)
+
+    if (!this.subscriptions[queryRef]) {
+      this.subscriptions[queryRef] = {
+        listeners: [],
+        terms,
+        beforeQueries: [],
+        onQueries: [],
+        onErrors: [],
+        subscriberCount: 0
+      }
+
+      this.statuses[queryRef] = {
+        error: null,
+        loading: false,
+        records: null
+      }
+
+      this._store.on('transform', this._compare.bind(this, queryRef))
+      this._queryCache(queryRef)
+    }
+
+    this.subscriptions[queryRef].subscriberCount++
+
+    beforeQuery && this.subscriptions[queryRef].beforeQueries.push(beforeQuery)
+    onQuery && this.subscriptions[queryRef].onQueries.push(onQuery)
+    onError && this.subscriptions[queryRef].onErrors.push(onError)
+    listener && this.subscriptions[queryRef].listeners.push(listener)
+
+    return queryRef
   }
 
-  unsubscribe (queryRef: string, listener: Listener, eventCallbacks: EventCallbacks<E> = {}) {
+  unsubscribe (queryRef: string, eventCallbacks: EventCallbacks<E> = {}) {
     if (this._ongoingQueries[queryRef]) {
-      this._ongoingQueries[queryRef].afterRequestQueue.push(() => this._unsubscribe(queryRef, listener, eventCallbacks))
+      this._ongoingQueries[queryRef].afterRequestQueue.push(() => this._unsubscribe(queryRef, eventCallbacks))
     } else {
-      this._unsubscribe(queryRef, listener, eventCallbacks)
+      this._unsubscribe(queryRef, eventCallbacks)
     }
   }
 
-  _unsubscribe (queryRef: string, listener: Listener, { beforeQuery, onQuery, onError }: EventCallbacks<E>) {
-    this.subscriptions[queryRef].listeners =
-      this.subscriptions[queryRef].listeners.filter(item => item !== listener)
+  _unsubscribe (queryRef: string, { beforeQuery, onQuery, onError, listener }: EventCallbacks<E>) {
+    const subscription = this.subscriptions[queryRef]
 
-    if (beforeQuery) {
-      this.subscriptions[queryRef].beforeQueries =
-        this.subscriptions[queryRef].beforeQueries.filter(item => item !== beforeQuery)
-    }
+    subscription.subscriberCount--
 
-    if (onQuery) {
-      this.subscriptions[queryRef].onQueries =
-        this.subscriptions[queryRef].onQueries.filter(item => item !== onQuery)
-    }
+    if (listener) subscription.listeners = subscription.listeners.filter(item => item !== listener)
+    if (beforeQuery) subscription.beforeQueries = subscription.beforeQueries.filter(item => item !== beforeQuery)
+    if (onQuery) subscription.onQueries = subscription.onQueries.filter(item => item !== onQuery)
+    if (onError) subscription.onErrors = subscription.onErrors.filter(item => item !== onError)
 
-    if (onError) {
-      this.subscriptions[queryRef].onErrors =
-        this.subscriptions[queryRef].onErrors.filter(item => item !== onError)
-    }
-
-    if (this.subscriptions[queryRef].listeners.length === 0) {
+    if (subscription.subscriberCount === 0) {
       delete this.subscriptions[queryRef]
       delete this.statuses[queryRef]
 

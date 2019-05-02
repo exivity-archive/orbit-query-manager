@@ -8,27 +8,26 @@ import {
   FindRelatedRecords
 } from '@orbit/data'
 
-export type BeforeCallback<E extends {}> = ((expression: Term[], extensions: Readonly<E>) => boolean | void) & { label?: string }
+export type BeforeCallback<E extends {}> = ((expression: Term[], extensions: Readonly<E>) => boolean | void)
 
-export type OnCallback<E extends {}> = ((records: RecordObject, extensions: Readonly<E>) => void) & { label?: string }
+export type OnCallback<E extends {}> = ((records: RecordObject, extensions: Readonly<E>) => void)
 
-export type OnErrorCallback<E extends {}> = ((error: Error, extensions: Readonly<E>) => void) & { label?: string }
+export type OnErrorCallback<E extends {}> = ((error: Error, extensions: Readonly<E>) => void)
+
+export type Listener = (() => void)
 
 export interface EventCallbacks<E> {
   beforeQuery?: BeforeCallback<E>
   onQuery?: OnCallback<E>
   onError?: OnErrorCallback<E>
+  listener?: Listener
 }
-
-export interface SubscribeOptions { listenerLabel?: string }
 
 export type Queries = { [key: string]: (q: QueryBuilder) => QueryTerm }
 
 export type Expressions = FindRecord | FindRelatedRecord | FindRecords | FindRelatedRecords
 
 export type Term = { key: string, expression: Expressions }
-
-export type Listener = (() => void) & { label?: string }
 
 export interface RecordObject {
   [key: string]: Record
@@ -57,6 +56,7 @@ export interface Subscription<E> {
   beforeQueries: BeforeCallback<E>[]
   onQueries: OnCallback<E>[]
   onErrors: OnErrorCallback<E>[]
+  subscriberCount: number
 }
 
 export interface Subscriptions<E> {

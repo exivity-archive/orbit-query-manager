@@ -1,10 +1,9 @@
-import { QueryBuilder, Schema, ModelDefinition, FindRecord } from '@orbit/data'
+import { QueryBuilder, Schema, ModelDefinition } from '@orbit/data'
 import { QueryManager } from '../QueryManager'
 import Store from '@orbit/store'
 import { Dict } from '@orbit/utils'
 
 const modelDefenition: Dict<ModelDefinition> = {
-
   account: {
     attributes: {
       test: { type: 'string' }
@@ -61,7 +60,7 @@ test('QueryManager.registerQuery(...) creates a new subscription when called for
 
   const query = { Account: (q: QueryBuilder) => q.findRecord(account) }
 
-  const queryRef = manager.registerQuery(query)
+  const queryRef = manager.subscribe(query)
 
   expect(queryRef).toBeDefined()
   expect(manager.subscriptions[queryRef]).toBeDefined()
@@ -74,7 +73,7 @@ test('QueryManager.query(...) makes a new query when no queries are going on', a
 
   const query = { Account: (q: QueryBuilder) => q.findRecord(account) }
 
-  const queryRef = manager.registerQuery(query)
+  const queryRef = manager.subscribe(query)
 
   await manager._store.update(t => t.addRecord(account))
 
@@ -95,12 +94,11 @@ test('QueryManager.subscribe(...) subscribes you to changes in the cache in reco
 
   const query = { Account: (q: QueryBuilder) => q.findRecord(account) }
 
-  const queryRef = manager.registerQuery(query)
-  const listener = jest.fn()
-
   await manager._store.update(t => t.addRecord(account))
 
-  manager.subscribe(queryRef, listener)
+  const listener = jest.fn()
+  const queryRef = manager.subscribe(query, { listener })
+
   manager.query(queryRef)
 
   await Promise.all(manager._ongoingQueries[queryRef].request)
@@ -114,13 +112,11 @@ test('QueryManager.query(...) can take a callback that runs after the request fi
 
   const query = { Account: (q: QueryBuilder) => q.findRecord(account) }
 
-  const queryRef = manager.registerQuery(query)
-  const listener = jest.fn()
-  const onFinishRequest = jest.fn()
-
   await manager._store.update(t => t.addRecord(account))
 
-  manager.subscribe(queryRef, listener)
+  const queryRef = manager.subscribe(query)
+
+  const onFinishRequest = jest.fn()
   manager.query(queryRef, onFinishRequest)
 
   await Promise.all(manager._ongoingQueries[queryRef].request)
@@ -134,14 +130,11 @@ test('QueryManager.unsubscribe(...) delete result object when there are no liste
 
   const query = { Account: (q: QueryBuilder) => q.findRecord(account) }
 
-  const queryRef = manager.registerQuery(query)
-  const listener = jest.fn()
+  const queryRef = manager.subscribe(query)
 
-  manager.subscribe(queryRef, listener)
+  expect(manager.subscriptions[queryRef].subscriberCount).toBe(1)
 
-  expect(manager.subscriptions[queryRef].listeners.length).toBe(1)
-
-  manager.unsubscribe(queryRef, listener)
+  manager.unsubscribe(queryRef)
 
   expect(manager.subscriptions[queryRef]).toBeUndefined()
   done()
@@ -152,14 +145,11 @@ test('QueryManager.unsubscribe(...) delete statuses object when there are no lis
 
   const query = { Account: (q: QueryBuilder) => q.findRecord(account) }
 
-  const queryRef = manager.registerQuery(query)
+  const queryRef = manager.subscribe(query)
 
   expect(manager.statuses[queryRef]).toBeDefined()
 
-  const listener = jest.fn()
-
-  manager.subscribe(queryRef, listener)
-  manager.unsubscribe(queryRef, listener)
+  manager.unsubscribe(queryRef)
 
   expect(manager.statuses[queryRef]).toBeUndefined()
   done()
@@ -170,15 +160,14 @@ test('QueryManager.unsubscribe(...) waits for ongoing query to be done before de
 
   const query = { Account: (q: QueryBuilder) => q.findRecord(account) }
 
-  const queryRef = manager.registerQuery(query)
   const listener = () => { }
   listener.label = 'test'
 
   await manager._store.update(t => t.addRecord(account))
 
-  manager.subscribe(queryRef, listener)
+  const queryRef = manager.subscribe(query)
   manager.query(queryRef)
-  manager.unsubscribe(queryRef, listener)
+  manager.unsubscribe(queryRef)
 
   expect(manager.statuses[queryRef]).toBeDefined()
   expect(manager.subscriptions[queryRef]).toBeDefined()
@@ -197,9 +186,7 @@ test('The record object is null if no match is found', () => {
 
   const query = { Account: (q: QueryBuilder) => q.findRecord(account) }
 
-  const queryRef = manager.registerQuery(query)
-
-  manager.subscribe(queryRef, jest.fn())
+  const queryRef = manager.subscribe(query)
 
   expect(manager.statuses[queryRef].records).toBe(null)
 })
@@ -209,9 +196,7 @@ test('The record object is null if the cache updates and no match is found', asy
 
   const query = { Account: (q: QueryBuilder) => q.findRecord(account) }
 
-  const queryRef = manager.registerQuery(query)
-
-  manager.subscribe(queryRef, jest.fn())
+  const queryRef = manager.subscribe(query)
 
   await manager._store.update(t => t.addRecord(account))
 
@@ -228,9 +213,7 @@ test('When the cache updates the records object is also updated if a match is fo
 
   const query = { Account: (q: QueryBuilder) => q.findRecord(account) }
 
-  const queryRef = manager.registerQuery(query)
-
-  manager.subscribe(queryRef, jest.fn())
+  const queryRef = manager.subscribe(query)
 
   await manager._store.update(t => t.addRecord(account))
 
@@ -244,9 +227,8 @@ test('The beforeQuery event callback gets called before every query', async done
   const query = { Account: (q: QueryBuilder) => q.findRecord(account) }
 
   const beforeQuery = jest.fn()
-  const queryRef = manager.registerQuery(query, { beforeQuery })
 
-  manager.subscribe(queryRef, jest.fn())
+  manager.subscribe(query, { beforeQuery })
 
   await manager._store.update(t => t.addRecord(account))
 
@@ -264,9 +246,8 @@ test('The onQuery event callback gets called when a query finishes successfully'
   const query = { Account: (q: QueryBuilder) => q.findRecord(account) }
 
   const onQuery = jest.fn()
-  const queryRef = manager.registerQuery(query, { onQuery })
 
-  manager.subscribe(queryRef, jest.fn())
+  manager.subscribe(query, { onQuery })
 
   await manager._store.update(t => t.addRecord(account))
 
@@ -281,11 +262,10 @@ test('The onError event callback gets called when a query errors', async done =>
   const query = { Account: (q: QueryBuilder) => q.findRecord(account) }
 
   const onError = jest.fn()
-  const queryRef = manager.registerQuery(query, { onError })
 
   await manager._store.update(t => t.addRecord(account))
 
-  manager.subscribe(queryRef, jest.fn())
+  manager.subscribe(query, { onError })
 
   await manager._store.update(t => t.removeRecord(account))
 
@@ -299,10 +279,8 @@ describe('Listener gets called after', () => {
 
     const query = { Account: (q: QueryBuilder) => q.findRecords('account') }
 
-    const queryRef = manager.registerQuery(query)
-
     const listener = jest.fn()
-    manager.subscribe(queryRef, listener)
+    manager.subscribe(query, { listener })
 
     await manager._store.update(t => t.addRecord(account))
 
@@ -315,12 +293,10 @@ describe('Listener gets called after', () => {
 
     const query = { Account: (q: QueryBuilder) => q.findRecords('account') }
 
-    const queryRef = manager.registerQuery(query)
-
     await manager._store.update(t => t.addRecord(account))
 
     const listener = jest.fn()
-    manager.subscribe(queryRef, listener)
+    manager.subscribe(query, { listener })
 
     await manager._store.update(t => t.replaceRecord(account))
 
@@ -333,12 +309,10 @@ describe('Listener gets called after', () => {
 
     const query = { Account: (q: QueryBuilder) => q.findRecords('account') }
 
-    const queryRef = manager.registerQuery(query)
-
     await manager._store.update(t => t.addRecord(account))
 
     const listener = jest.fn()
-    manager.subscribe(queryRef, listener)
+    manager.subscribe(query, { listener })
 
     await manager._store.update(t => t.removeRecord(account))
 
@@ -351,12 +325,10 @@ describe('Listener gets called after', () => {
 
     const query = { Account: (q: QueryBuilder) => q.findRecords('account') }
 
-    const queryRef = manager.registerQuery(query)
-
     await manager._store.update(t => t.addRecord(account))
 
     const listener = jest.fn()
-    manager.subscribe(queryRef, listener)
+    manager.subscribe(query, { listener })
 
     await manager._store.update(t => t.replaceKey(account, 'testKey', 'testValue'))
 
@@ -371,10 +343,8 @@ describe('Listener gets called after', () => {
 
     await manager._store.update(t => t.addRecord(account))
 
-    const queryRef = manager.registerQuery(query)
-
     const listener = jest.fn()
-    manager.subscribe(queryRef, listener)
+    manager.subscribe(query, { listener })
 
     await manager._store.update(t => t.replaceAttribute(account, 'test', 'hello'))
 
@@ -387,12 +357,10 @@ describe('Listener gets called after', () => {
 
     const query = { Account: (q: QueryBuilder) => q.findRecords('account') }
 
-    const queryRef = manager.registerQuery(query)
-
     await manager._store.update(t => [t.addRecord(account), t.addRecord({ type: 'service', id: '1' })])
 
     const listener = jest.fn()
-    manager.subscribe(queryRef, listener)
+    manager.subscribe(query, { listener })
 
     await manager._store.update(t => t.addToRelatedRecords(account, 'services', { type: 'service', id: '1' }))
 
@@ -406,12 +374,10 @@ describe('Listener gets called after', () => {
 
     const query = { Account: (q: QueryBuilder) => q.findRecords('account') }
 
-    const queryRef = manager.registerQuery(query)
-
     await manager._store.update(t => [t.addRecord(account), t.addRecord(service)])
 
     const listener = jest.fn()
-    manager.subscribe(queryRef, listener)
+    manager.subscribe(query, { listener })
 
     await manager._store.update(t => t.addToRelatedRecords(service, 'subscribers', account))
 
@@ -425,8 +391,6 @@ describe('Listener gets called after', () => {
 
     const query = { Account: (q: QueryBuilder) => q.findRecords('account') }
 
-    const queryRef = manager.registerQuery(query)
-
     await manager._store.update(t => [
       t.addRecord(account),
       t.addRecord(service),
@@ -434,7 +398,7 @@ describe('Listener gets called after', () => {
     ])
 
     const listener = jest.fn()
-    manager.subscribe(queryRef, listener)
+    manager.subscribe(query, { listener })
 
     await manager._store.update(t => t.removeFromRelatedRecords(account, 'services', service))
 
@@ -448,8 +412,6 @@ describe('Listener gets called after', () => {
 
     const query = { Account: (q: QueryBuilder) => q.findRecords('account') }
 
-    const queryRef = manager.registerQuery(query)
-
     await manager._store.update(t => [
       t.addRecord(account),
       t.addRecord(service),
@@ -457,7 +419,7 @@ describe('Listener gets called after', () => {
     ])
 
     const listener = jest.fn()
-    manager.subscribe(queryRef, listener)
+    manager.subscribe(query, { listener })
 
     await manager._store.update(t => t.removeFromRelatedRecords(service, 'subscribers', account))
 
@@ -472,8 +434,6 @@ describe('Listener gets called after', () => {
 
     const query = { Account: (q: QueryBuilder) => q.findRecords('account') }
 
-    const queryRef = manager.registerQuery(query)
-
     await manager._store.update(t => [
       t.addRecord(account),
       t.addRecord(service1),
@@ -482,7 +442,7 @@ describe('Listener gets called after', () => {
     ])
 
     const listener = jest.fn()
-    manager.subscribe(queryRef, listener)
+    manager.subscribe(query, { listener })
 
     await manager._store.update(t => t.replaceRelatedRecords(account, 'services', [service2]))
 
@@ -497,8 +457,6 @@ describe('Listener gets called after', () => {
 
     const query = { Account: (q: QueryBuilder) => q.findRecords('account') }
 
-    const queryRef = manager.registerQuery(query)
-
     await manager._store.update(t => [
       t.addRecord(account1),
       t.addRecord(account2),
@@ -507,7 +465,7 @@ describe('Listener gets called after', () => {
     ])
 
     const listener = jest.fn()
-    manager.subscribe(queryRef, listener)
+    manager.subscribe(query, { listener })
 
     await manager._store.update(t => t.replaceRelatedRecords(service, 'subscribers', [account2]))
 
@@ -522,8 +480,6 @@ describe('Listener gets called after', () => {
 
     const query = { Account: (q: QueryBuilder) => q.findRecords('account') }
 
-    const queryRef = manager.registerQuery(query)
-
     await manager._store.update(t => [
       t.addRecord(account),
       t.addRecord(profile1),
@@ -532,7 +488,7 @@ describe('Listener gets called after', () => {
     ])
 
     const listener = jest.fn()
-    manager.subscribe(queryRef, listener)
+    manager.subscribe(query, { listener })
 
     await manager._store.update(t => t.replaceRelatedRecord(account, 'profile', profile2))
 
@@ -547,8 +503,6 @@ describe('Listener gets called after', () => {
 
     const query = { Account: (q: QueryBuilder) => q.findRecords('account') }
 
-    const queryRef = manager.registerQuery(query)
-
     await manager._store.update(t => [
       t.addRecord(account1),
       t.addRecord(account2),
@@ -557,7 +511,7 @@ describe('Listener gets called after', () => {
     ])
 
     const listener = jest.fn()
-    manager.subscribe(queryRef, listener)
+    manager.subscribe(query, { listener })
 
     await manager._store.update(t => t.replaceRelatedRecord(profile, 'account', account2))
 
@@ -570,10 +524,8 @@ describe('Listener gets called after', () => {
 
     const query = { Account: (q: QueryBuilder) => q.findRecord(account) }
 
-    const queryRef = manager.registerQuery(query)
-
     const listener = jest.fn()
-    manager.subscribe(queryRef, listener)
+    manager.subscribe(query, { listener })
 
     await manager._store.update(t => t.addRecord(account))
 
@@ -586,12 +538,10 @@ describe('Listener gets called after', () => {
 
     const query = { Account: (q: QueryBuilder) => q.findRecord(account) }
 
-    const queryRef = manager.registerQuery(query)
-
     await manager._store.update(t => t.addRecord(account))
 
     const listener = jest.fn()
-    manager.subscribe(queryRef, listener)
+    manager.subscribe(query, { listener })
 
     await manager._store.update(t => t.replaceRecord(account))
 
@@ -604,12 +554,10 @@ describe('Listener gets called after', () => {
 
     const query = { Account: (q: QueryBuilder) => q.findRecord(account) }
 
-    const queryRef = manager.registerQuery(query)
-
     await manager._store.update(t => t.addRecord(account))
 
     const listener = jest.fn()
-    manager.subscribe(queryRef, listener)
+    manager.subscribe(query, { listener })
 
     await manager._store.update(t => t.removeRecord(account))
 
@@ -622,12 +570,10 @@ describe('Listener gets called after', () => {
 
     const query = { Account: (q: QueryBuilder) => q.findRecord(account) }
 
-    const queryRef = manager.registerQuery(query)
-
     await manager._store.update(t => t.addRecord(account))
 
     const listener = jest.fn()
-    manager.subscribe(queryRef, listener)
+    manager.subscribe(query, { listener })
 
     await manager._store.update(t => t.replaceKey(account, 'testKey', 'testValue'))
 
@@ -640,12 +586,10 @@ describe('Listener gets called after', () => {
 
     const query = { Account: (q: QueryBuilder) => q.findRecord(account) }
 
-    const queryRef = manager.registerQuery(query)
-
     await manager._store.update(t => t.addRecord(account))
 
     const listener = jest.fn()
-    manager.subscribe(queryRef, listener)
+    manager.subscribe(query, { listener })
 
     await manager._store.update(t => t.replaceAttribute(account, 'test', 'hello'))
 
@@ -659,12 +603,10 @@ describe('Listener gets called after', () => {
 
     const query = { Account: (q: QueryBuilder) => q.findRecord(account) }
 
-    const queryRef = manager.registerQuery(query)
-
     await manager._store.update(t => [t.addRecord(account), t.addRecord(service)])
 
     const listener = jest.fn()
-    manager.subscribe(queryRef, listener)
+    manager.subscribe(query, { listener })
 
     await manager._store.update(t => t.addToRelatedRecords(account, 'services', service))
 
@@ -678,12 +620,10 @@ describe('Listener gets called after', () => {
 
     const query = { Account: (q: QueryBuilder) => q.findRecord(account) }
 
-    const queryRef = manager.registerQuery(query)
-
     await manager._store.update(t => [t.addRecord(account), t.addRecord(service)])
 
     const listener = jest.fn()
-    manager.subscribe(queryRef, listener)
+    manager.subscribe(query, { listener })
 
     await manager._store.update(t => t.addToRelatedRecords(service, 'subscribers', account))
 
@@ -697,8 +637,6 @@ describe('Listener gets called after', () => {
 
     const query = { Account: (q: QueryBuilder) => q.findRecord(account) }
 
-    const queryRef = manager.registerQuery(query)
-
     await manager._store.update(t => [
       t.addRecord(account),
       t.addRecord(service),
@@ -706,7 +644,7 @@ describe('Listener gets called after', () => {
     ])
 
     const listener = jest.fn()
-    manager.subscribe(queryRef, listener)
+    manager.subscribe(query, { listener })
 
     await manager._store.update(t => t.removeFromRelatedRecords(account, 'services', service))
 
@@ -720,8 +658,6 @@ describe('Listener gets called after', () => {
 
     const query = { Account: (q: QueryBuilder) => q.findRecord(account) }
 
-    const queryRef = manager.registerQuery(query)
-
     await manager._store.update(t => [
       t.addRecord(account),
       t.addRecord(service),
@@ -729,7 +665,7 @@ describe('Listener gets called after', () => {
     ])
 
     const listener = jest.fn()
-    manager.subscribe(queryRef, listener)
+    manager.subscribe(query, { listener })
 
     await manager._store.update(t => t.removeFromRelatedRecords(service, 'subscribers', account))
 
@@ -744,8 +680,6 @@ describe('Listener gets called after', () => {
 
     const query = { Account: (q: QueryBuilder) => q.findRecord(account) }
 
-    const queryRef = manager.registerQuery(query)
-
     await manager._store.update(t => [
       t.addRecord(account),
       t.addRecord(service1),
@@ -754,7 +688,7 @@ describe('Listener gets called after', () => {
     ])
 
     const listener = jest.fn()
-    manager.subscribe(queryRef, listener)
+    manager.subscribe(query, { listener })
 
     await manager._store.update(t => t.replaceRelatedRecords(account, 'services', [service2]))
 
@@ -769,8 +703,6 @@ describe('Listener gets called after', () => {
 
     const query = { Account: (q: QueryBuilder) => q.findRecord(account1) }
 
-    const queryRef = manager.registerQuery(query)
-
     await manager._store.update(t => [
       t.addRecord(account1),
       t.addRecord(account2),
@@ -779,7 +711,7 @@ describe('Listener gets called after', () => {
     ])
 
     const listener = jest.fn()
-    manager.subscribe(queryRef, listener)
+    manager.subscribe(query, { listener })
 
     await manager._store.update(t => t.replaceRelatedRecords(service, 'subscribers', [account2]))
 
@@ -794,8 +726,6 @@ describe('Listener gets called after', () => {
 
     const query = { Account: (q: QueryBuilder) => q.findRecord(account) }
 
-    const queryRef = manager.registerQuery(query)
-
     await manager._store.update(t => [
       t.addRecord(account),
       t.addRecord(profile1),
@@ -804,7 +734,7 @@ describe('Listener gets called after', () => {
     ])
 
     const listener = jest.fn()
-    manager.subscribe(queryRef, listener)
+    manager.subscribe(query, { listener })
 
     await manager._store.update(t => t.replaceRelatedRecord(account, 'profile', profile2))
 
@@ -819,8 +749,6 @@ describe('Listener gets called after', () => {
 
     const query = { Account: (q: QueryBuilder) => q.findRecord(account1) }
 
-    const queryRef = manager.registerQuery(query)
-
     await manager._store.update(t => [
       t.addRecord(account1),
       t.addRecord(account2),
@@ -829,7 +757,7 @@ describe('Listener gets called after', () => {
     ])
 
     const listener = jest.fn()
-    manager.subscribe(queryRef, listener)
+    manager.subscribe(query, { listener })
 
     await manager._store.update(t => t.replaceRelatedRecord(profile, 'account', account2))
 
