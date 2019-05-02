@@ -1,5 +1,6 @@
 import { RecordIdentity, RecordOperation } from '@orbit/data'
-import { Term } from './types';
+import { Term, Listener } from './types'
+
 
 export const identityIsEqual = (a: RecordIdentity | null, b: RecordIdentity | null) =>
   (!a && !b) || (a && b && a.type === b.type && a.id === b.id)
@@ -42,4 +43,15 @@ export const getUpdatedRecords = (operations: RecordOperation[]) => {
   })
 
   return { records, relatedRecords }
+}
+
+export const generateLabel = (listeners: Listener[]) => {
+  let i = 1
+  while (true) {
+    const currentLabel = `listener_${i}`
+    if (!listeners.some(listener => listener.label === currentLabel)) {
+      return currentLabel
+    }
+    i++
+  }
 }

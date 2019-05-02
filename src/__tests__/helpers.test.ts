@@ -1,5 +1,5 @@
 import { Term } from '../types'
-import { shouldUpdate, getUpdatedRecords } from '../helpers'
+import { shouldUpdate, getUpdatedRecords, generateLabel } from '../helpers'
 import { RecordOperation } from '@orbit/data';
 
 describe('shouldUpdate(...)', () => {
@@ -91,5 +91,21 @@ describe('getUpdatedRecords(...)', () => {
     const { relatedRecords } = getUpdatedRecords([operation])
 
     expect(relatedRecords).toMatchObject([service1, service2])
+  })
+})
+
+describe('generateLabel(...)', () => {
+  test('should generate a unique label', () => {
+    const listener1 = () => { }
+    const listener2 = () => { }
+
+    const label1 = generateLabel([])
+    listener1.label = label1
+
+    const label2 = generateLabel([listener1])
+    listener2.label = label2
+
+    expect(listener1.label[listener1.label.length - 1]).toBe('1')
+    expect(listener2.label[listener2.label.length - 1]).toBe('2')
   })
 })

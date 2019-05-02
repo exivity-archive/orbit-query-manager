@@ -88,25 +88,60 @@ test('QueryManager.subscribe(...) subscribes you to changes in the cache in reco
   done()
 })
 
+test('QueryManager.query(...) makes a new query when no queries are going on', async done => {
+  const account = { type: 'account', id: '1' }
+
+  const query = { Account: (q: QueryBuilder) => q.findRecord(account) }
+
+  const queryRef = manager.registerQuery(query)
+
+  await manager._store.update(t => t.addRecord(account))
+
+  const result = new Promise(resolve => {
+    manager.subscribe(queryRef, resolve)
+  })
+
+  expect(manager._ongoingQueries[queryRef]).toBeUndefined()
+
+  manager.query(queryRef)
+
+  expect(manager._ongoingQueries[queryRef]).toBeDefined()
+
+  await result
+
+  expect(manager._ongoingQueries[queryRef]).toBeUndefined()
+  done()
+})
+
+test('QueryManager.query(...) can take a callback that runs after the request finishes', async done => {
+  const account = { type: 'account', id: '1' }
+
+  const query = { Account: (q: QueryBuilder) => q.findRecord(account) }
+
+  const queryRef = manager.registerQuery(query)
+  const listener = () => { }
+
+  await manager._store.update(t => t.addRecord(account))
+
+  manager.subscribe(queryRef, listener)
+  manager.query(queryRef, done)
+})
+
 test('QueryManager.unsubscribe(...) delete result object when there are no listeners left', async done => {
   const account = { type: 'account', id: '1' }
 
   const query = { Account: (q: QueryBuilder) => q.findRecord(account) }
 
-  const queryRef1 = manager.registerQuery(query)
-  const queryRef2 = manager.registerQuery(query)
-  const listener1 = () => { }
-  const listener2 = () => { }
+  const queryRef = manager.registerQuery(query)
+  const listener = () => { }
 
-  manager.subscribe(queryRef1, listener1)
-  manager.subscribe(queryRef2, listener2)
+  manager.subscribe(queryRef, listener)
 
-  expect(manager.subscriptions[queryRef1].listeners.length).toBe(2)
+  expect(manager.subscriptions[queryRef].listeners.length).toBe(1)
 
-  manager.unsubscribe(queryRef1, listener1)
-  manager.unsubscribe(queryRef2, listener2)
+  manager.unsubscribe(queryRef, listener)
 
-  expect(manager.subscriptions[queryRef1]).toBeUndefined()
+  expect(manager.subscriptions[queryRef]).toBeUndefined()
   done()
 })
 
@@ -116,7 +151,6 @@ test('QueryManager.unsubscribe(...) delete statuses object when there are no lis
   const query = { Account: (q: QueryBuilder) => q.findRecord(account) }
 
   const queryRef = manager.registerQuery(query)
-
   const listener = () => { }
   listener.label = 'test'
 
@@ -135,6 +169,35 @@ test('QueryManager.unsubscribe(...) delete statuses object when there are no lis
   manager.unsubscribe(queryRef, listener)
 
   expect(manager.statuses[queryRef]).toBeUndefined()
+  done()
+})
+
+test('QueryManager.unsubscribe(...) waits for ongoing query to be done before deleting the results and statuses if no listeners are left', async done => {
+  const account = { type: 'account', id: '1' }
+
+  const query = { Account: (q: QueryBuilder) => q.findRecord(account) }
+
+  const queryRef = manager.registerQuery(query)
+  const listener = () => { }
+  listener.label = 'test'
+
+  await manager._store.update(t => t.addRecord(account))
+
+  const subscriptions = new Promise(resolve => {
+    manager.subscribe(queryRef, resolve, { listenerLabel: 'test' })
+  })
+
+  manager.query(queryRef)
+
+  manager.unsubscribe(queryRef, listener)
+
+  expect(manager.statuses[queryRef]).toBeDefined()
+  expect(manager.subscriptions[queryRef]).toBeDefined()
+
+  await subscriptions
+
+  expect(manager.statuses[queryRef]).toBeUndefined()
+  expect(manager.subscriptions[queryRef]).toBeUndefined()
   done()
 })
 

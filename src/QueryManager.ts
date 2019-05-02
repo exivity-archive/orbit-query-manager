@@ -13,7 +13,7 @@ import {
   SubscribeOptions,
 } from './types'
 import { Transform, RecordOperation, RecordIdentity } from '@orbit/data'
-import { shouldUpdate, getUpdatedRecords } from './helpers'
+import { shouldUpdate, getUpdatedRecords, generateLabel } from './helpers'
 
 export class QueryManager<E extends { [key: string]: any } = any>  {
   _extensions: E
@@ -58,44 +58,36 @@ export class QueryManager<E extends { [key: string]: any } = any>  {
     if (label) {
       listener.label = label
     } else {
-      let i = 1
-      while (true) {
-        if (!this.subscriptions[queryRef].listeners.some((listener => listener.label === `${i}`))) {
-          listener.label = `${i}`
-          break
-        }
-        i++
-      }
+      listener.label = generateLabel(this.subscriptions[queryRef].listeners)
     }
   }
 
   unsubscribe (queryRef: string, listener: Listener) {
+    if (this._ongoingQueries[queryRef]) {
+      this._ongoingQueries[queryRef].afterRequestQueue.push(() => this._unsubscribe(queryRef, listener))
+    } else {
+      this._unsubscribe(queryRef, listener)
+    }
+  }
+
+  _unsubscribe (queryRef: string, listener: Listener) {
     this.subscriptions[queryRef].listeners =
       this.subscriptions[queryRef].listeners.filter(item => item.label !== listener.label)
 
-
     if (this.subscriptions[queryRef].listeners.length === 0) {
-      if (this._ongoingQueries[queryRef] && this.statuses[queryRef].loading) {
-        this._ongoingQueries[queryRef].afterRequestQueue.push(() => {
-          delete this.subscriptions[queryRef]
-          delete this.statuses[queryRef]
-        })
-      } else {
-        delete this.subscriptions[queryRef]
-        delete this.statuses[queryRef]
-      }
+      delete this.subscriptions[queryRef]
+      delete this.statuses[queryRef]
 
       this._store.off('transform', this._compare.bind(this, queryRef))
     }
   }
 
-  query (queryRef: string, onFinish: () => void) {
+  query (queryRef: string, onFinish?: () => void) {
     if (!this._ongoingQueries[queryRef]) {
       this._query(queryRef)
     }
 
-    this._ongoingQueries[queryRef].afterRequestQueue.push(onFinish)
-
+    onFinish && this._ongoingQueries[queryRef].afterRequestQueue.push(onFinish)
   }
 
   _query (queryRef: string) {
@@ -110,27 +102,25 @@ export class QueryManager<E extends { [key: string]: any } = any>  {
         })
       )
 
-    this.statuses[queryRef] = { error: null, loading: false }
+    this.statuses[queryRef] = { error: null, loading: true }
 
     this._ongoingQueries[queryRef] = { afterRequestQueue: [], request: queries }
 
     Promise.all(this._ongoingQueries[queryRef].request)
       .then(() => {
-
         this.statuses[queryRef].loading = false
 
-        this._ongoingQueries[queryRef].afterRequestQueue.forEach(fn => fn())
         this.subscriptions[queryRef].listeners.forEach(listener => listener())
+        this._ongoingQueries[queryRef].afterRequestQueue.forEach(fn => fn())
 
         delete this._ongoingQueries[queryRef]
       })
       .catch(error => {
-
         this.statuses[queryRef].loading = false
         this.statuses[queryRef].error = error
 
-        this._ongoingQueries[queryRef].afterRequestQueue.forEach(fn => fn())
         this.subscriptions[queryRef].listeners.forEach(listener => listener())
+        this._ongoingQueries[queryRef].afterRequestQueue.forEach(fn => fn())
 
         delete this._ongoingQueries[queryRef]
       })
