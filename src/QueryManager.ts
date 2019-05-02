@@ -12,7 +12,7 @@ import {
   Listener,
   SubscribeOptions,
 } from './types'
-import { Transform, RecordOperation, RecordIdentity } from '@orbit/data'
+import { Transform, RecordOperation } from '@orbit/data'
 import { shouldUpdate, getUpdatedRecords, generateLabel } from './helpers'
 
 export class QueryManager<E extends { [key: string]: any } = any>  {

@@ -2,8 +2,6 @@ import { QueryBuilder, Schema, ModelDefinition, FindRecord } from '@orbit/data'
 import { QueryManager } from '../QueryManager'
 import Store from '@orbit/store'
 import { Dict } from '@orbit/utils'
-import { Term } from '../types';
-import { shouldUpdate } from '../helpers';
 
 const modelDefenition: Dict<ModelDefinition> = {
 

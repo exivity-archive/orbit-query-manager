@@ -1,7 +1,6 @@
 import { RecordIdentity, RecordOperation } from '@orbit/data'
 import { Term, Listener } from './types'
 
-
 export const identityIsEqual = (a: RecordIdentity | null, b: RecordIdentity | null) =>
   (!a && !b) || (a && b && a.type === b.type && a.id === b.id)
 
