@@ -1,3 +1,6 @@
+[![npm](https://img.shields.io/npm/v/orbit-query-manager.svg)](https://www.npmjs.com/package/orbit-query-manager)
+[![Travis](https://img.shields.io/travis/exivity/orbit-query-manager.svg)](https://travis-ci.com/exivity/orbit-query-manager)
+
 # orbit-query-manager
 
 =============
