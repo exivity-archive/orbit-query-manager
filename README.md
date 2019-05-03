@@ -47,6 +47,15 @@ const manager = new QueryManager(store,
 ### Use the QueryManager
 
 ```js
+// initialize the manager
+const manager = new QueryManager(store,
+  extensions: {
+    dispatch: redux.dispatch,
+    router: react.router,
+    modal: modal
+  }
+)
+
 // By subscribing to a query you specify that your're interested in when the records you queried for change.
 const query = { Accounts: q => q.findRecords('account')}
 const listener = () => { console.log('An account got changed')}
@@ -60,7 +69,7 @@ manager.query(queryRef)
 manager.query(queryRef)
 manager.query(queryRef)
 
-// But the onFinish callbacks keep stacking
+// The onFinish callbacks keep stacking however
 manager.query(queryRef, () => { console.log('I get called') })
 manager.query(queryRef, () => { console.log('I get called too') })
 
