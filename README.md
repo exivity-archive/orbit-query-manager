@@ -2,9 +2,7 @@
 
 =============
 
-A manager for [Orbit](https://orbitjs.com/) that listens for changes in the cache and hooks queries into ongoing identical queries.
-
-This package helps to keep the data in your app up to date in an efficient way by updating your records only when they have been changed and by hooking multiple identical queries into the same request
+A manager for [Orbit](https://orbitjs.com/) that listens for changes in the cache and prevents identical requests to be called in parallel by hooking onto ongoing requests. This helps keep the data in your app up to date in an efficient way.
 
 ---
 
