@@ -3,20 +3,20 @@ import Store from '@orbit/store'
 import {
   Term,
   OngoingQueries,
-  RecordObject,
   Expressions,
   Queries,
   Subscriptions,
   Statuses,
-  EventCallbacks
+  EventCallbacks,
+  RecordObject
 } from './types'
 import { Transform, RecordOperation } from '@orbit/data'
-import { shouldUpdate, getUpdatedRecords } from './helpers'
+import { shouldUpdate, getUpdatedRecords, removeEventCallback, addEventCallback } from './helpers'
 
 export class QueryManager<E extends { [key: string]: any } = any>  {
   _extensions: E
   _store: Store
-  _ongoingQueries: OngoingQueries
+  _ongoingQueries: OngoingQueries<E>
 
   _subscriptions: Subscriptions<E>
   statuses: Statuses
@@ -36,7 +36,7 @@ export class QueryManager<E extends { [key: string]: any } = any>  {
     )
   }
 
-  subscribe (queries: Queries, { beforeQuery, onQuery, onError, listener }: EventCallbacks<E> = {}) {
+  subscribe (queries: Queries, { listener, beforeQuery, onQuery, onError }: EventCallbacks<E> = {}) {
     const terms = this._extractTerms(queries)
     const queryRef = JSON.stringify(terms)
 
@@ -62,33 +62,31 @@ export class QueryManager<E extends { [key: string]: any } = any>  {
 
     this._subscriptions[queryRef].subscriberCount++
 
-    beforeQuery && this._subscriptions[queryRef].beforeQueries.push(beforeQuery)
-    onQuery && this._subscriptions[queryRef].onQueries.push(onQuery)
-    onError && this._subscriptions[queryRef].onErrors.push(onError)
-    listener && this._subscriptions[queryRef].listeners.push(listener)
+    addEventCallback(listener, this._subscriptions[queryRef].listeners)
+    addEventCallback(beforeQuery, this._subscriptions[queryRef].beforeQueries)
+    addEventCallback(onQuery, this._subscriptions[queryRef].onQueries)
+    addEventCallback(onError, this._subscriptions[queryRef].onErrors)
 
     return queryRef
   }
 
   unsubscribe (queryRef: string, eventCallbacks: EventCallbacks<E> = {}) {
     if (this._ongoingQueries[queryRef]) {
-      this._ongoingQueries[queryRef].afterRequestQueue.push(() => this._unsubscribe(queryRef, eventCallbacks))
+      addEventCallback(this._unsubscribe.bind(this, queryRef, eventCallbacks), this._ongoingQueries[queryRef].afterRequestQueue)
     } else {
       this._unsubscribe(queryRef, eventCallbacks)
     }
   }
 
-  _unsubscribe (queryRef: string, { beforeQuery, onQuery, onError, listener }: EventCallbacks<E>) {
-    const subscription = this._subscriptions[queryRef]
+  _unsubscribe (queryRef: string, { listener, beforeQuery, onQuery, onError }: EventCallbacks<E>) {
+    this._subscriptions[queryRef].subscriberCount--
 
-    subscription.subscriberCount--
+    removeEventCallback(listener, this._subscriptions[queryRef].listeners)
+    removeEventCallback(beforeQuery, this._subscriptions[queryRef].beforeQueries)
+    removeEventCallback(onQuery, this._subscriptions[queryRef].onQueries)
+    removeEventCallback(onError, this._subscriptions[queryRef].onErrors)
 
-    if (listener) subscription.listeners = subscription.listeners.filter(item => item !== listener)
-    if (beforeQuery) subscription.beforeQueries = subscription.beforeQueries.filter(item => item !== beforeQuery)
-    if (onQuery) subscription.onQueries = subscription.onQueries.filter(item => item !== onQuery)
-    if (onError) subscription.onErrors = subscription.onErrors.filter(item => item !== onError)
-
-    if (subscription.subscriberCount === 0) {
+    if (this._subscriptions[queryRef].subscriberCount === 0) {
       delete this._subscriptions[queryRef]
       delete this.statuses[queryRef]
 
@@ -96,18 +94,29 @@ export class QueryManager<E extends { [key: string]: any } = any>  {
     }
   }
 
-  query (queryRef: string, onFinish?: () => void) {
-    if (!this._ongoingQueries[queryRef]) {
-      this._query(queryRef)
+  query (queryRef: string, { listener, beforeQuery, onQuery, onError }: EventCallbacks<E> = {}) {
+    const queryExists = Boolean(this._ongoingQueries[queryRef])
+    if (!queryExists) {
+      this._ongoingQueries[queryRef] = {
+        afterRequestQueue: [],
+        beforeQueries: [],
+        onQueries: [],
+        onErrors: [],
+      }
     }
 
-    onFinish && this._ongoingQueries[queryRef].afterRequestQueue.push(onFinish)
+    addEventCallback(listener, this._ongoingQueries[queryRef].afterRequestQueue)
+    addEventCallback(beforeQuery, this._ongoingQueries[queryRef].beforeQueries)
+    addEventCallback(onQuery, this._ongoingQueries[queryRef].onQueries)
+    addEventCallback(onError, this._ongoingQueries[queryRef].onErrors)
+
+    if (!queryExists) this._query(queryRef)
   }
 
-  _query (queryRef: string) {
+  async _query (queryRef: string) {
     const terms = this._subscriptions[queryRef].terms
 
-    const queries: Promise<RecordObject>[] = terms
+    this._ongoingQueries[queryRef].request = terms
       .map(({ key, expression }) =>
         new Promise((resolve, reject) => {
           this._store.query(expression)
@@ -118,45 +127,50 @@ export class QueryManager<E extends { [key: string]: any } = any>  {
 
     this.statuses[queryRef].loading = true
 
-    this._ongoingQueries[queryRef] = { afterRequestQueue: [], request: queries }
+    this._ongoingQueries[queryRef].beforeQueries.forEach(fn => fn(terms, this._extensions))
 
-    Promise.all(this._ongoingQueries[queryRef].request)
-      .then(() => {
-        this.statuses[queryRef].loading = false
+    try {
+      const result = await Promise.all(this._ongoingQueries[queryRef].request)
+      const records = result.reduce((acc, result) => ({ ...acc, ...result }), {})
 
-        this._subscriptions[queryRef].listeners.forEach(listener => listener())
-        this._ongoingQueries[queryRef].afterRequestQueue.forEach(fn => fn())
+      this._ongoingQueries[queryRef].onQueries.forEach(fn => fn(records, this._extensions))
 
-        delete this._ongoingQueries[queryRef]
-      })
-      .catch(error => {
-        this.statuses[queryRef].loading = false
-        this.statuses[queryRef].error = error
+      this.statuses[queryRef].loading = false
+    } catch (error) {
+      this._ongoingQueries[queryRef].onErrors.forEach(fn => fn(error, this._extensions))
 
-        this._subscriptions[queryRef].listeners.forEach(listener => listener())
-        this._ongoingQueries[queryRef].afterRequestQueue.forEach(fn => fn())
+      this.statuses[queryRef].loading = false
+      this.statuses[queryRef].error = error
 
-        delete this._ongoingQueries[queryRef]
-      })
+    } finally {
+      this._onRequestFinish(queryRef)
+    }
+  }
+
+  _onRequestFinish (queryRef: string) {
+    this._ongoingQueries[queryRef].afterRequestQueue.forEach(fn => fn())
+
+    delete this._ongoingQueries[queryRef]
   }
 
   _queryCache (queryRef: string) {
-
     const terms = this._subscriptions[queryRef].terms
+
     this._subscriptions[queryRef].beforeQueries.forEach(beforeQuery => beforeQuery(terms, this._extensions))
 
+    let records: RecordObject | null
     try {
-      const res = terms.map(({ key, expression }) => ({ [key]: this._store.cache.query(expression) }))
+      records = terms.map(({ key, expression }) => ({ [key]: this._store.cache.query(expression) }))
         .reduce((acc, result) => ({ ...acc, ...result }), {})
 
-      this._subscriptions[queryRef].onQueries.forEach(onQuery => onQuery(res, this._extensions))
-      this.statuses[queryRef].records = res
-      return
+      this._subscriptions[queryRef].onQueries.forEach(onQuery => onQuery(records, this._extensions))
     } catch (err) {
+      records = null
+
       this._subscriptions[queryRef].onErrors.forEach(onError => onError(err, this._extensions))
     }
 
-    this.statuses[queryRef].records = null
+    this.statuses[queryRef].records = records
   }
 
   _compare (queryRef: string, transform: Transform) {

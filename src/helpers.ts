@@ -43,3 +43,11 @@ export const getUpdatedRecords = (operations: RecordOperation[]) => {
 
   return { records, relatedRecords }
 }
+
+export const addEventCallback = <T> (cbToAdd: T, list: T[]) => {
+  if (cbToAdd) list.push(cbToAdd)
+}
+
+export const removeEventCallback = <T> (cbToRemove: T, list: T[]) => {
+  if (cbToRemove) list = list.filter(cb => cb !== cbToRemove)
+} 

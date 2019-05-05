@@ -89,24 +89,6 @@ test('QueryManager.query(...) makes a new query when no queries are going on', a
   done()
 })
 
-test('QueryManager.subscribe(...) subscribes you to changes in the cache in records you\'re listening to', async done => {
-  const account = { type: 'account', id: '1' }
-
-  const query = { Account: (q: QueryBuilder) => q.findRecord(account) }
-
-  await manager._store.update(t => t.addRecord(account))
-
-  const listener = jest.fn()
-  const queryRef = manager.subscribe(query, { listener })
-
-  manager.query(queryRef)
-
-  await Promise.all(manager._ongoingQueries[queryRef].request)
-
-  expect(listener).toHaveBeenCalledTimes(1)
-  done()
-})
-
 test('QueryManager.query(...) can take a callback that runs after the request finishes', async done => {
   const account = { type: 'account', id: '1' }
 
@@ -117,7 +99,7 @@ test('QueryManager.query(...) can take a callback that runs after the request fi
   const queryRef = manager.subscribe(query)
 
   const onFinishRequest = jest.fn()
-  manager.query(queryRef, onFinishRequest)
+  manager.query(queryRef, { listener: onFinishRequest })
 
   await Promise.all(manager._ongoingQueries[queryRef].request)
 
@@ -221,7 +203,65 @@ test('When the cache updates the records object is also updated if a match is fo
   done()
 })
 
-test('The beforeQuery event callback gets called before every query', async done => {
+test('The beforeQuery event callback gets called before every request', async done => {
+  const account = { type: 'account', id: '1' }
+
+  const query = { Account: (q: QueryBuilder) => q.findRecord(account) }
+
+  await manager._store.update(t => t.addRecord(account))
+
+  const beforeQuery = jest.fn()
+
+  const queryRef = manager.subscribe(query)
+  manager.query(queryRef, { beforeQuery })
+
+  await Promise.all(manager._ongoingQueries[queryRef].request)
+
+  expect(beforeQuery).toHaveBeenCalledTimes(1)
+  expect(beforeQuery).toHaveBeenCalledWith(
+    [{ key: 'Account', expression: { op: 'findRecord', record: account } }],
+    { skip: ['account'] }
+  )
+  done()
+})
+
+test('The onQuery event callback gets called when a request finishes successfully', async done => {
+  const account = { type: 'account', id: '1' }
+
+  const query = { Account: (q: QueryBuilder) => q.findRecord(account) }
+
+  await manager._store.update(t => t.addRecord(account))
+
+  const onQuery = jest.fn(() => 0)
+
+  const queryRef = manager.subscribe(query)
+  manager.query(queryRef, { onQuery })
+
+  await Promise.all(manager._ongoingQueries[queryRef].request)
+
+  expect(onQuery).toHaveBeenCalledTimes(1)
+  expect(onQuery).toHaveBeenCalledWith({ Account: account }, { skip: ['account'] })
+  done()
+})
+
+test('The onError event callback gets called when a request errors', async done => {
+  const account = { type: 'account', id: '1' }
+
+  // @ts-ignore
+  const query = { Account: (q: QueryBuilder) => q.findRecord(account) }
+
+  const onError = jest.fn()
+
+  const queryRef = manager.subscribe(query)
+  manager.query(queryRef, { onError })
+
+  await Promise.all(manager._ongoingQueries[queryRef].request).catch(() => { })
+
+  expect(onError).toHaveBeenCalledTimes(1)
+  done()
+})
+
+test('The beforeQuery event callback gets called before every query to the cache', async done => {
   const account = { type: 'account', id: '1' }
 
   const query = { Account: (q: QueryBuilder) => q.findRecord(account) }

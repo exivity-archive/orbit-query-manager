@@ -33,10 +33,13 @@ export interface RecordObject {
   [key: string]: Record
 }
 
-export interface OngoingQueries {
+export interface OngoingQueries<E> {
   [key: string]: {
-    request: Promise<RecordObject>[]
+    request?: Promise<RecordObject>[]
     afterRequestQueue: (() => void)[]
+    beforeQueries: BeforeCallback<E>[]
+    onQueries: OnCallback<E>[]
+    onErrors: OnErrorCallback<E>[]
   }
 }
 
