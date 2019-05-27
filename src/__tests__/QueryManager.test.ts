@@ -1,7 +1,8 @@
-import { QueryBuilder, Schema, ModelDefinition } from '@orbit/data'
+import { QueryBuilder, Schema, ModelDefinition, AddRecordOperation, Transform, ReplaceRecordOperation, RemoveRecordOperation, ReplaceKeyOperation, ReplaceAttributeOperation, AddToRelatedRecordsOperation, RemoveFromRelatedRecordsOperation, ReplaceRelatedRecordsOperation, ReplaceRelatedRecordOperation } from '@orbit/data'
 import { QueryManager } from '../QueryManager'
 import Store from '@orbit/store'
 import { Dict } from '@orbit/utils'
+import { Expression, Term } from '../types';
 
 const modelDefenition: Dict<ModelDefinition> = {
   account: {
@@ -40,75 +41,11 @@ beforeEach(() => {
   manager = new QueryManager(store.fork())
 })
 
-test('QueryManager._extractTerms(...) returns an ordered array of terms', () => {
-  const account = { type: 'account', id: '1' }
-
-  const query = (q: QueryBuilder) => q.findRecord(account)
-  const queries = { Cccount: query, Account: query, Bccount: query, }
-
-  const terms = manager._extractTerms(queries)
-
-  expect(terms).toMatchObject([
-    { key: 'Account', expression: { op: 'findRecord', record: account } },
-    { key: 'Bccount', expression: { op: 'findRecord', record: account } },
-    { key: 'Cccount', expression: { op: 'findRecord', record: account } }
-  ])
-})
-
-test('QueryManager.query(...) makes a new query when no queries are going on', () => {
-  const account = { type: 'account', id: '1' }
-
-  const query = { Account: (q: QueryBuilder) => q.findRecord(account) }
-  const listener = jest.fn()
-
-  manager.subscribe(query, listener)
-
-  expect(Object.keys(manager._queryRefs).length).toBe(0)
-
-  manager.query(query)
-
-  expect(Object.keys(manager._queryRefs).length).toBe(1)
-})
-
-describe('queryCache(...)', () => {
-  test('The record object is null if no match is found', () => {
-    const account = { type: 'account', id: '1' }
-
-    const query = { Account: (q: QueryBuilder) => q.findRecord(account) }
-
-    const data = manager.queryCache(query)
-
-    expect(data[0]).toBe(null)
-  })
-})
-
 describe('subscribe(...)', () => {
-  test('The record object is null if the cache updates and no match is found', async done => {
+  test('returns an unsubscribe function that stops listening for events if there are no subscriptions left', () => {
     const account = { type: 'account', id: '1' }
 
-    const query = { Account: (q: QueryBuilder) => q.findRecord(account) }
-
-    let data: any
-    const listener = jest.fn(result => {
-      data = result
-    })
-
-    manager.subscribe(query, listener)
-
-    await manager._store.update(t => t.addRecord(account))
-
-    expect(data[0]).toMatchObject({ Account: account })
-
-    await manager._store.update(t => t.removeRecord(account))
-
-    expect(data[0]).toBe(null)
-    done()
-  })
-
-  test('returns a function that stops listening for events if there are no subscriptions left', () => {
-    const account = { type: 'account', id: '1' }
-
-    const query = { Account: (q: QueryBuilder) => q.findRecord(account) }
+    const query = (q: QueryBuilder) => q.findRecord(account)
     const listener = jest.fn()
 
     const unsubscribe = manager.subscribe(query, listener)
@@ -123,496 +60,900 @@ describe('subscribe(...)', () => {
   })
 })
 
-
-describe('Listener gets called after', () => {
-  test('AddRecordOperation while listening to a type of record', async done => {
+describe('query(...)', () => {
+  test('Makes a new query when no queries are going on', () => {
     const account = { type: 'account', id: '1' }
 
-    const query = { Account: (q: QueryBuilder) => q.findRecords('account') }
+    const query = (q: QueryBuilder) => q.findRecord(account)
 
-    const listener = jest.fn()
-    manager.subscribe(query, listener)
+    manager.query(query)
 
-    await manager._store.update(t => t.addRecord(account))
+    expect(Object.keys(manager._queryRefs).length).toBe(1)
+  })
 
-    expect(listener).toHaveBeenCalledTimes(1)
+  test('Sets loading to true when a query is made', () => {
+    const account = { type: 'account', id: '1' }
+
+
+    const expression: Expression = { op: 'findRecord', record: account }
+    const id = JSON.stringify(expression)
+
+    const query = (q: QueryBuilder) => q.findRecord(account)
+
+    manager.query(query)
+
+    expect(manager._queryRefs[id].isLoading).toBe(true)
+  })
+
+  test('Makes a new _afterQueryQueue when a query gets added', () => {
+    const account = { type: 'account', id: '1' }
+
+    const query = (q: QueryBuilder) => q.findRecord(account)
+
+    manager.query(query)
+
+    expect(Object.keys(manager._afterQueryQueue).length).toBe(1)
+  })
+
+  test('No new query will be made when an identical query already exists', () => {
+    const account = { type: 'account', id: '1' }
+
+    const query = (q: QueryBuilder) => q.findRecord(account)
+
+    manager.query(query)
+    manager.query(query)
+
+    expect(Object.keys(manager._queryRefs).length).toBe(1)
+  })
+
+  test('Able to pass in options to make a unique query', () => {
+    const account = { type: 'account', id: '1' }
+
+    const query = (q: QueryBuilder) => q.findRecord(account)
+
+    const options = { test: 'test' }
+
+    manager.query(query)
+    manager.query(query, options)
+
+    expect(Object.keys(manager._queryRefs).length).toBe(2)
+  })
+})
+
+describe('_query(...)', () => {
+  test('sets loading to false after the query', async (done) => {
+    const account = { type: 'account', id: '1' }
+
+    const expression: Expression = { op: 'findRecord', record: account }
+    const id = JSON.stringify(expression)
+
+    manager._subscriptions[id] = []
+    manager._queryRefs[id] = { isLoading: true, isError: false }
+    manager._afterQueryQueue[id] = []
+
+    await manager._query(id, expression)
+
+    expect(manager._queryRefs[id].isLoading).toBe(false)
     done()
   })
 
-  test('ReplaceRecordOperation while listening to a type of record', async done => {
+  test('Sets isError as true on _queryRef if query fails (single query)', async (done) => {
     const account = { type: 'account', id: '1' }
 
-    const query = { Account: (q: QueryBuilder) => q.findRecords('account') }
+    const expression: Expression = { op: 'findRecord', record: account }
+    const id = JSON.stringify(expression)
 
-    await manager._store.update(t => t.addRecord(account))
+    manager._subscriptions[id] = []
+    manager._queryRefs[id] = { isLoading: true, isError: false }
+    manager._afterQueryQueue[id] = []
 
-    const listener = jest.fn()
-    manager.subscribe(query, listener)
+    await manager._query(id, expression)
 
-    await manager._store.update(t => t.replaceRecord(account))
-
-    expect(listener).toHaveBeenCalledTimes(1)
+    expect(manager._queryRefs[id].isError).toBe(true)
     done()
   })
 
-  test('RemoveRecordOperation while listening to a type of record', async done => {
-    const account = { type: 'account', id: '1' }
-
-    const query = { Account: (q: QueryBuilder) => q.findRecords('account') }
-
-    await manager._store.update(t => t.addRecord(account))
-
-    const listener = jest.fn()
-    manager.subscribe(query, listener)
-
-    await manager._store.update(t => t.removeRecord(account))
-
-    expect(listener).toHaveBeenCalledTimes(1)
-    done()
-  })
-
-  test('ReplaceKeyOperation while listening to a type of record', async done => {
-    const account = { type: 'account', id: '1' }
-
-    const query = { Account: (q: QueryBuilder) => q.findRecords('account') }
-
-    await manager._store.update(t => t.addRecord(account))
-
-    const listener = jest.fn()
-    manager.subscribe(query, listener)
-
-    await manager._store.update(t => t.replaceKey(account, 'testKey', 'testValue'))
-
-    expect(listener).toHaveBeenCalledTimes(1)
-    done()
-  })
-
-  test('ReplaceAttributeOperation while listening to a type of record', async done => {
-    const account = { type: 'account', id: '1' }
-
-    const query = { Account: (q: QueryBuilder) => q.findRecords('account') }
-
-    await manager._store.update(t => t.addRecord(account))
-
-    const listener = jest.fn()
-    manager.subscribe(query, listener)
-
-    await manager._store.update(t => t.replaceAttribute(account, 'test', 'hello'))
-
-    expect(listener).toHaveBeenCalledTimes(1)
-    done()
-  })
-
-  test('AddToRelatedRecordsOperation while listening to a type of record (record perspective)', async done => {
-    const account = { type: 'account', id: '1' }
-
-    const query = { Account: (q: QueryBuilder) => q.findRecords('account') }
-
-    await manager._store.update(t => [t.addRecord(account), t.addRecord({ type: 'service', id: '1' })])
-
-    const listener = jest.fn()
-    manager.subscribe(query, listener)
-
-    await manager._store.update(t => t.addToRelatedRecords(account, 'services', { type: 'service', id: '1' }))
-
-    expect(listener).toHaveBeenCalledTimes(1)
-    done()
-  })
-
-  test('AddToRelatedRecordsOperation while listening to a type of record (relation perspective)', async done => {
-    const account = { type: 'account', id: '1' }
-    const service = { type: 'service', id: '1' }
-
-    const query = { Account: (q: QueryBuilder) => q.findRecords('account') }
-
-    await manager._store.update(t => [t.addRecord(account), t.addRecord(service)])
-
-    const listener = jest.fn()
-    manager.subscribe(query, listener)
-
-    await manager._store.update(t => t.addToRelatedRecords(service, 'subscribers', account))
-
-    expect(listener).toHaveBeenCalledTimes(1)
-    done()
-  })
-
-  test('RemoveFromRelatedRecordsOperation while listening to a type of record (record perspective)', async done => {
-    const account = { type: 'account', id: '1' }
-    const service = { type: 'service', id: '1' }
-
-    const query = { Account: (q: QueryBuilder) => q.findRecords('account') }
-
-    await manager._store.update(t => [
-      t.addRecord(account),
-      t.addRecord(service),
-      t.addToRelatedRecords(account, 'services', service)
-    ])
-
-    const listener = jest.fn()
-    manager.subscribe(query, listener)
-
-    await manager._store.update(t => t.removeFromRelatedRecords(account, 'services', service))
-
-    expect(listener).toHaveBeenCalledTimes(1)
-    done()
-  })
-
-  test('RemoveFromRelatedRecordsOperation while listening to a type of record (relation perspective)', async done => {
-    const account = { type: 'account', id: '1' }
-    const service = { type: 'service', id: '1' }
-
-    const query = { Account: (q: QueryBuilder) => q.findRecords('account') }
-
-    await manager._store.update(t => [
-      t.addRecord(account),
-      t.addRecord(service),
-      t.addToRelatedRecords(service, 'subscribers', account)
-    ])
-
-    const listener = jest.fn()
-    manager.subscribe(query, listener)
-
-    await manager._store.update(t => t.removeFromRelatedRecords(service, 'subscribers', account))
-
-    expect(listener).toHaveBeenCalledTimes(1)
-    done()
-  })
-
-  test('ReplaceRelatedRecordsOperation while listening to a type of record (record perspective)', async done => {
-    const account = { type: 'account', id: '1' }
-    const service1 = { type: 'service', id: '1' }
-    const service2 = { type: 'service', id: '2' }
-
-    const query = { Account: (q: QueryBuilder) => q.findRecords('account') }
-
-    await manager._store.update(t => [
-      t.addRecord(account),
-      t.addRecord(service1),
-      t.addRecord(service2),
-      t.addToRelatedRecords(account, 'services', service1)
-    ])
-
-    const listener = jest.fn()
-    manager.subscribe(query, listener)
-
-    await manager._store.update(t => t.replaceRelatedRecords(account, 'services', [service2]))
-
-    expect(listener).toHaveBeenCalledTimes(1)
-    done()
-  })
-
-  test('ReplaceRelatedRecordsOperation while listening to a type of record (relation perspective)', async done => {
+  test('Sets isError as true on _queryRef if one of the queries fail (multiple queries)', async (done) => {
     const account1 = { type: 'account', id: '1' }
     const account2 = { type: 'account', id: '2' }
-    const service = { type: 'service', id: '1' }
 
-    const query = { Account: (q: QueryBuilder) => q.findRecords('account') }
+    await manager._store.update(t => [t.addRecord(account1)])
 
-    await manager._store.update(t => [
-      t.addRecord(account1),
-      t.addRecord(account2),
-      t.addRecord(service),
-      t.addToRelatedRecords(service, 'subscribers', account1)
-    ])
+    const terms: Term[] = [
+      { key: 'Account1', expression: { op: 'findRecord', record: account1 } },
+      { key: 'Account2', expression: { op: 'findRecord', record: account2 } }
+    ]
+    const id = JSON.stringify(terms)
 
-    const listener = jest.fn()
-    manager.subscribe(query, listener)
+    manager._subscriptions[id] = []
+    manager._queryRefs[id] = { isLoading: true, isError: false }
+    manager._afterQueryQueue[id] = []
 
-    await manager._store.update(t => t.replaceRelatedRecords(service, 'subscribers', [account2]))
+    await manager._query(id, terms)
 
-    expect(listener).toHaveBeenCalledTimes(1)
+    expect(manager._queryRefs[id].isError).toBe(true)
     done()
   })
 
-  test('ReplaceRelatedRecordOperation while listening to a type of record (record perspective)', async done => {
+  test('Notifies subscribers after query is finished', async (done) => {
     const account = { type: 'account', id: '1' }
-    const profile1 = { type: 'profile', id: '1' }
-    const profile2 = { type: 'profile', id: '2' }
 
-    const query = { Account: (q: QueryBuilder) => q.findRecords('account') }
-
-    await manager._store.update(t => [
-      t.addRecord(account),
-      t.addRecord(profile1),
-      t.addRecord(profile2),
-      t.replaceRelatedRecord(account, 'profile', profile1)
-    ])
+    const expression: Expression = { op: 'findRecord', record: account }
+    const id = JSON.stringify(expression)
 
     const listener = jest.fn()
-    manager.subscribe(query, listener)
 
-    await manager._store.update(t => t.replaceRelatedRecord(account, 'profile', profile2))
+    manager._subscriptions[id] = [listener]
+    manager._queryRefs[id] = { isLoading: true, isError: false }
+    manager._afterQueryQueue[id] = []
 
-    expect(listener).toHaveBeenCalledTimes(1)
+    await manager._query(id, expression)
+
+    expect(listener).toBeCalledTimes(1)
     done()
   })
 
-  test('ReplaceRelatedRecordOperation while listening to a type of record (relation perspective)', async done => {
+  test('Notifies subscribers with record when one is found (single query)', async (done) => {
+    const account = { type: 'account', id: '1' }
+
+    await manager._store.update(t => t.addRecord(account))
+
+    const expression: Expression = { op: 'findRecord', record: account }
+    const id = JSON.stringify(expression)
+
+    // returns record
+    const listener = jest.fn(result => result[0])
+
+    manager._subscriptions[id] = [listener]
+    manager._queryRefs[id] = { isLoading: true, isError: false }
+    manager._afterQueryQueue[id] = []
+
+    await manager._query(id, expression)
+
+    expect(listener).toReturnWith(account)
+    done()
+  })
+
+  test('Notifies subscriber with null when no record is found (single query)', async (done) => {
+    const account = { type: 'account', id: '1' }
+
+    const expression: Expression = { op: 'findRecord', record: account }
+    const id = JSON.stringify(expression)
+
+    // returns record
+    const listener = jest.fn(result => result[0])
+
+    manager._subscriptions[id] = [listener]
+    manager._queryRefs[id] = { isLoading: true, isError: false }
+    manager._afterQueryQueue[id] = []
+
+    await manager._query(id, expression)
+
+    expect(listener).toReturnWith(null)
+    done()
+  })
+
+  test('Notifies subscribers with record object if all are found (multiple queries)', async (done) => {
     const account1 = { type: 'account', id: '1' }
     const account2 = { type: 'account', id: '2' }
-    const profile = { type: 'profile', id: '1' }
 
-    const query = { Account: (q: QueryBuilder) => q.findRecords('account') }
+    await manager._store.update(t => [t.addRecord(account1), t.addRecord(account2)])
 
-    await manager._store.update(t => [
-      t.addRecord(account1),
-      t.addRecord(account2),
-      t.addRecord(profile),
-      t.replaceRelatedRecord(profile, 'account', account2)
-    ])
+    const terms: Term[] = [
+      { key: 'Account1', expression: { op: 'findRecord', record: account1 } },
+      { key: 'Account2', expression: { op: 'findRecord', record: account2 } }
+    ]
+    const id = JSON.stringify(terms)
 
-    const listener = jest.fn()
-    manager.subscribe(query, listener)
+    // returns record
+    const listener = jest.fn(result => result[0])
 
-    await manager._store.update(t => t.replaceRelatedRecord(profile, 'account', account2))
+    manager._subscriptions[id] = [listener]
+    manager._queryRefs[id] = { isLoading: true, isError: false }
+    manager._afterQueryQueue[id] = []
 
-    expect(listener).toHaveBeenCalledTimes(1)
+    await manager._query(id, terms)
+
+    expect(listener).toReturnWith({ Account1: account1, Account2: account2 })
     done()
   })
 
-  test('AddRecordOperation while listening to a specific record', async done => {
-    const account = { type: 'account', id: '1' }
-
-    const query = { Account: (q: QueryBuilder) => q.findRecord(account) }
-
-    const listener = jest.fn()
-    manager.subscribe(query, listener)
-
-    await manager._store.update(t => t.addRecord(account))
-
-    expect(listener).toHaveBeenCalledTimes(1)
-    done()
-  })
-
-  test('ReplaceRecordOperation while listening to a specific record', async done => {
-    const account = { type: 'account', id: '1' }
-
-    const query = { Account: (q: QueryBuilder) => q.findRecord(account) }
-
-    await manager._store.update(t => t.addRecord(account))
-
-    const listener = jest.fn()
-    manager.subscribe(query, listener)
-
-    await manager._store.update(t => t.replaceRecord(account))
-
-    expect(listener).toHaveBeenCalledTimes(1)
-    done()
-  })
-
-  test('RemoveRecordOperation while listening to a specific record', async done => {
-    const account = { type: 'account', id: '1' }
-
-    const query = { Account: (q: QueryBuilder) => q.findRecord(account) }
-
-    await manager._store.update(t => t.addRecord(account))
-
-    const listener = jest.fn()
-    manager.subscribe(query, listener)
-
-    await manager._store.update(t => t.removeRecord(account))
-
-    expect(listener).toHaveBeenCalledTimes(1)
-    done()
-  })
-
-  test('ReplaceKeyOperation while listening to a specific record', async done => {
-    const account = { type: 'account', id: '1' }
-
-    const query = { Account: (q: QueryBuilder) => q.findRecord(account) }
-
-    await manager._store.update(t => t.addRecord(account))
-
-    const listener = jest.fn()
-    manager.subscribe(query, listener)
-
-    await manager._store.update(t => t.replaceKey(account, 'testKey', 'testValue'))
-
-    expect(listener).toHaveBeenCalledTimes(1)
-    done()
-  })
-
-  test('ReplaceAttributeOperation while listening to a specific record', async done => {
-    const account = { type: 'account', id: '1' }
-
-    const query = { Account: (q: QueryBuilder) => q.findRecord(account) }
-
-    await manager._store.update(t => t.addRecord(account))
-
-    const listener = jest.fn()
-    manager.subscribe(query, listener)
-
-    await manager._store.update(t => t.replaceAttribute(account, 'test', 'hello'))
-
-    expect(listener).toHaveBeenCalledTimes(1)
-    done()
-  })
-
-  test('AddToRelatedRecordsOperation while listening to a specific record (record perspective)', async done => {
-    const account = { type: 'account', id: '1' }
-    const service = { type: 'service', id: '1' }
-
-    const query = { Account: (q: QueryBuilder) => q.findRecord(account) }
-
-    await manager._store.update(t => [t.addRecord(account), t.addRecord(service)])
-
-    const listener = jest.fn()
-    manager.subscribe(query, listener)
-
-    await manager._store.update(t => t.addToRelatedRecords(account, 'services', service))
-
-    expect(listener).toHaveBeenCalledTimes(1)
-    done()
-  })
-
-  test('AddToRelatedRecordsOperation while listening to a specific record (relation perspective)', async done => {
-    const account = { type: 'account', id: '1' }
-    const service = { type: 'service', id: '1' }
-
-    const query = { Account: (q: QueryBuilder) => q.findRecord(account) }
-
-    await manager._store.update(t => [t.addRecord(account), t.addRecord(service)])
-
-    const listener = jest.fn()
-    manager.subscribe(query, listener)
-
-    await manager._store.update(t => t.addToRelatedRecords(service, 'subscribers', account))
-
-    expect(listener).toHaveBeenCalledTimes(1)
-    done()
-  })
-
-  test('RemoveFromRelatedRecordsOperation while listening to a specific record (record perspective)', async done => {
-    const account = { type: 'account', id: '1' }
-    const service = { type: 'service', id: '1' }
-
-    const query = { Account: (q: QueryBuilder) => q.findRecord(account) }
-
-    await manager._store.update(t => [
-      t.addRecord(account),
-      t.addRecord(service),
-      t.addToRelatedRecords(account, 'services', service)
-    ])
-
-    const listener = jest.fn()
-    manager.subscribe(query, listener)
-
-    await manager._store.update(t => t.removeFromRelatedRecords(account, 'services', service))
-
-    expect(listener).toHaveBeenCalledTimes(1)
-    done()
-  })
-
-  test('RemoveFromRelatedRecordsOperation while listening to a specific record (relation perspective)', async done => {
-    const account = { type: 'account', id: '1' }
-    const service = { type: 'service', id: '1' }
-
-    const query = { Account: (q: QueryBuilder) => q.findRecord(account) }
-
-    await manager._store.update(t => [
-      t.addRecord(account),
-      t.addRecord(service),
-      t.addToRelatedRecords(service, 'subscribers', account)
-    ])
-
-    const listener = jest.fn()
-    manager.subscribe(query, listener)
-
-    await manager._store.update(t => t.removeFromRelatedRecords(service, 'subscribers', account))
-
-    expect(listener).toHaveBeenCalledTimes(1)
-    done()
-  })
-
-  test('ReplaceRelatedRecordsOperation while listening to a specific record (record perspective)', async done => {
-    const account = { type: 'account', id: '1' }
-    const service1 = { type: 'service', id: '1' }
-    const service2 = { type: 'service', id: '2' }
-
-    const query = { Account: (q: QueryBuilder) => q.findRecord(account) }
-
-    await manager._store.update(t => [
-      t.addRecord(account),
-      t.addRecord(service1),
-      t.addRecord(service2),
-      t.addToRelatedRecords(account, 'services', service1)
-    ])
-
-    const listener = jest.fn()
-    manager.subscribe(query, listener)
-
-    await manager._store.update(t => t.replaceRelatedRecords(account, 'services', [service2]))
-
-    expect(listener).toHaveBeenCalledTimes(1)
-    done()
-  })
-
-  test('ReplaceRelatedRecordsOperation while listening to a specific record (relation perspective)', async done => {
+  test('Notifies subscriber with null when one or more records are not found (multiple queries)', async (done) => {
     const account1 = { type: 'account', id: '1' }
     const account2 = { type: 'account', id: '2' }
-    const service = { type: 'service', id: '2' }
 
-    const query = { Account: (q: QueryBuilder) => q.findRecord(account1) }
+    await manager._store.update(t => [t.addRecord(account1)])
 
-    await manager._store.update(t => [
-      t.addRecord(account1),
-      t.addRecord(account2),
-      t.addRecord(service),
-      t.addToRelatedRecords(service, 'subscribers', account1)
-    ])
+    const terms: Term[] = [
+      { key: 'Account1', expression: { op: 'findRecord', record: account1 } },
+      { key: 'Account2', expression: { op: 'findRecord', record: account2 } }
+    ]
+    const id = JSON.stringify(terms)
 
-    const listener = jest.fn()
-    manager.subscribe(query, listener)
+    // returns record
+    const listener = jest.fn(result => result[0])
 
-    await manager._store.update(t => t.replaceRelatedRecords(service, 'subscribers', [account2]))
+    manager._subscriptions[id] = [listener]
+    manager._queryRefs[id] = { isLoading: true, isError: false }
+    manager._afterQueryQueue[id] = []
 
-    expect(listener).toHaveBeenCalledTimes(1)
+    await manager._query(id, terms)
+
+    expect(listener).toReturnWith(null)
     done()
   })
 
-  test('ReplaceRelatedRecordOperation while listening to a specific record (record perspective)', async done => {
+  test('Calls callbacks in the _afterQueryQueue once the query is finished', async (done) => {
     const account = { type: 'account', id: '1' }
-    const profile1 = { type: 'profile', id: '1' }
-    const profile2 = { type: 'profile', id: '2' }
 
-    const query = { Account: (q: QueryBuilder) => q.findRecord(account) }
+    const expression: Expression = { op: 'findRecord', record: account }
+    const id = JSON.stringify(expression)
 
-    await manager._store.update(t => [
-      t.addRecord(account),
-      t.addRecord(profile1),
-      t.addRecord(profile2),
-      t.replaceRelatedRecord(account, 'profile', profile1)
-    ])
+    const afterQueryCallback = jest.fn()
 
-    const listener = jest.fn()
-    manager.subscribe(query, listener)
+    manager._subscriptions[id] = []
+    manager._queryRefs[id] = { isLoading: true, isError: false }
+    manager._afterQueryQueue[id] = [afterQueryCallback, afterQueryCallback, afterQueryCallback]
 
-    await manager._store.update(t => t.replaceRelatedRecord(account, 'profile', profile2))
+    await manager._query(id, expression)
 
-    expect(listener).toHaveBeenCalledTimes(1)
+    expect(afterQueryCallback).toBeCalledTimes(3)
     done()
   })
 
-  test('ReplaceRelatedRecordOperation while listening to a specific record (relation perspective)', async done => {
-    const account1 = { type: 'account', id: '1' }
-    const account2 = { type: 'account', id: '2' }
-    const profile = { type: 'profile', id: '1' }
+  test('Deletes _afterQueryQueue once the query is finished', async (done) => {
+    const account = { type: 'account', id: '1' }
 
-    const query = { Account: (q: QueryBuilder) => q.findRecord(account1) }
+    const expression: Expression = { op: 'findRecord', record: account }
+    const id = JSON.stringify(expression)
 
-    await manager._store.update(t => [
-      t.addRecord(account1),
-      t.addRecord(account2),
-      t.addRecord(profile),
-      t.replaceRelatedRecord(profile, 'account', account1)
-    ])
+    manager._subscriptions[id] = []
+    manager._queryRefs[id] = { isLoading: true, isError: false }
+    manager._afterQueryQueue[id] = []
 
-    const listener = jest.fn()
-    manager.subscribe(query, listener)
+    await manager._query(id, expression)
 
-    await manager._store.update(t => t.replaceRelatedRecord(profile, 'account', account2))
-
-    expect(listener).toHaveBeenCalledTimes(1)
+    expect(manager._afterQueryQueue[id]).toBeUndefined()
     done()
   })
 })
+
+describe('_makeSingleQuery', () => {
+  test('Returns a promise that resolves with a record', async (done) => {
+    const account = { type: 'account', id: '1' }
+    const expression: Expression = { op: 'findRecord', record: account }
+
+    await manager._store.update(t => t.addRecord(account))
+
+    const result = await manager._makeSingleQuery(expression)
+
+    expect(result).toBe(account)
+    done()
+  })
+
+  test('Can take a second options parameter', async (done) => {
+    const account = { type: 'account', id: '1' }
+    const expression: Expression = { op: 'findRecord', record: account }
+    const options = { label: 'get account' }
+
+    await manager._store.update(t => t.addRecord(account))
+
+    const result = await manager._makeSingleQuery(expression, options)
+
+    expect(result).toBe(account)
+    done()
+  })
+})
+
+describe('_makeMultipleQueries', () => {
+  test('Returns a promise that resolves with a record object', async (done) => {
+    const account = { type: 'account', id: '1' }
+    const terms: Term[] = [{ key: 'Account', expression: { op: 'findRecord', record: account } }]
+
+    await manager._store.update(t => t.addRecord(account))
+
+    const result = await manager._makeMultipleQueries(terms)
+
+    expect(result).toMatchObject({ Account: account })
+    done()
+  })
+
+  test('Can take a second options parameter', async (done) => {
+    const account = { type: 'account', id: '1' }
+    const terms: Term[] = [{ key: 'Account', expression: { op: 'findRecord', record: account } }]
+
+    await manager._store.update(t => t.addRecord(account))
+
+    const result = await manager._makeMultipleQueries(terms)
+
+    expect(result).toMatchObject({ Account: account })
+    done()
+  })
+})
+
+describe('queryCache(...)', () => {
+  test('isError is true when no match is found (single query)', () => {
+    const account = { type: 'account', id: '1' }
+
+    const query = (q: QueryBuilder) => q.findRecord(account)
+
+    const data = manager.queryCache(query)
+
+    expect(data[1].isError).toBe(true)
+  })
+
+  test('isError is true when one or more matches are not found (multiple queries)', async done => {
+    const account1 = { type: 'account', id: '1' }
+    const account2 = { type: 'account', id: '2' }
+
+    const query = {
+      Bob: (q: QueryBuilder) => q.findRecord(account1),
+      Steve: (q: QueryBuilder) => q.findRecord(account2)
+    }
+
+    await manager._store.update(t => [t.addRecord(account2)])
+
+    const data = manager.queryCache(query)
+
+    expect(data[1].isError).toBe(true)
+    done()
+  })
+
+  test('Returns a record for a single query if a match is found', async (done) => {
+    const account = { type: 'account', id: '1' }
+
+    const query = (q: QueryBuilder) => q.findRecord(account)
+
+    await manager._store.update(t => t.addRecord(account))
+
+    const data = manager.queryCache(query)
+
+    expect(data[0]).toBe(account)
+    done()
+  })
+
+  test('Returns record if a match is found (single query)', async (done) => {
+    const account = { type: 'account', id: '1' }
+
+    const query = (q: QueryBuilder) => q.findRecord(account)
+
+    const data = manager.queryCache(query)
+
+    expect(data[0]).toBe(null)
+    done()
+  })
+
+  test('Returns null an an error if no match is found (single query)', () => {
+    const account = { type: 'account', id: '1' }
+
+    const query = (q: QueryBuilder) => q.findRecord(account)
+
+    const data = manager.queryCache(query)
+
+    expect(data[0]).toBe(null)
+  })
+
+  test('Returns a record object if all matches are found (multiple queries)', async (done) => {
+    const account1 = { type: 'account', id: '1' }
+    const account2 = { type: 'account', id: '2' }
+
+    const query = {
+      Bob: (q: QueryBuilder) => q.findRecord(account1),
+      Steve: (q: QueryBuilder) => q.findRecord(account2)
+    }
+
+    await manager._store.update(t => [t.addRecord(account1), t.addRecord(account2)])
+
+    const data = manager.queryCache(query)
+
+    expect(data[0]).toMatchObject({ Bob: account1, Steve: account2 })
+    done()
+  })
+
+  test('Returns null an an error if one or more of the matches are not found (multiple queries)', async (done) => {
+    const account1 = { type: 'account', id: '1' }
+    const account2 = { type: 'account', id: '2' }
+
+    const query = {
+      Bob: (q: QueryBuilder) => q.findRecord(account1),
+      Steve: (q: QueryBuilder) => q.findRecord(account2)
+    }
+
+    await manager._store.update(t => [t.addRecord(account2)])
+
+    const data = manager.queryCache(query)
+
+    expect(data[0]).toBe(null)
+    done()
+  })
+})
+
+describe('_compare(...)', () => {
+  test(`doesn't notify when a subscriber is already fetching`, () => {
+    const account = { type: 'account', id: '1' }
+
+    const query = q => q.findRecord('account')
+    const listener = jest.fn()
+
+    manager.query(query)
+    manager.subscribe(query, listener)
+
+    const operation: AddRecordOperation = { op: 'addRecord', record: account }
+    const transform: Transform = { operations: [operation], id: 'test' }
+
+    manager._compare(transform)
+
+    expect(listener).not.toBeCalled()
+  })
+
+  test(`notifies when a subscriber's subscribed-to record type is included and options were provided (single query)`, () => {
+    const account = { type: 'account', id: '1' }
+
+    const query = q => q.findRecord(account)
+    const listener = jest.fn()
+    const options = { test: 'test' }
+
+    manager.subscribe(query, listener, options)
+
+    const operation: AddRecordOperation = { op: 'addRecord', record: account }
+    const transform: Transform = { operations: [operation], id: 'test' }
+
+    manager._compare(transform)
+
+    expect(listener).toHaveBeenCalledTimes(1)
+  })
+
+  test(`notifies when a subscriber's subscribed-to record type is included and options were provided multiple queries`, () => {
+    const account1 = { type: 'account', id: '1' }
+    const account2 = { type: 'account', id: '2' }
+
+    const query = {
+      Account1: q => q.findRecord(account1),
+      Account2: q => q.findRecord(account2)
+    }
+    const listener = jest.fn()
+    const options = [{ queryKey: 'Account1', options: { test: 'test' } }]
+
+    manager.subscribe(query, listener, options)
+
+    const operation: AddRecordOperation = { op: 'addRecord', record: account1 }
+    const transform: Transform = { operations: [operation], id: 'test' }
+
+    manager._compare(transform)
+
+    expect(listener).toHaveBeenCalledTimes(1)
+  })
+
+  test(`notifies when a subscriber's subscribed-to record type is included in a AddRecordOperation`, () => {
+    const account = { type: 'account', id: '1' }
+
+    const query = q => q.findRecords('account')
+    const listener = jest.fn()
+
+    manager.subscribe(query, listener)
+
+    const operation: AddRecordOperation = { op: 'addRecord', record: account }
+    const transform: Transform = { operations: [operation], id: 'test' }
+
+    manager._compare(transform)
+
+    expect(listener).toHaveBeenCalledTimes(1)
+  })
+
+  test(`notifies when a subscriber's subscribed-to record is included in a AddRecordOperation`, () => {
+    const account = { type: 'account', id: '1' }
+
+    const query = q => q.findRecord(account)
+    const listener = jest.fn()
+
+    manager.subscribe(query, listener)
+
+    const operation: AddRecordOperation = { op: 'addRecord', record: account }
+    const transform: Transform = { operations: [operation], id: 'test' }
+
+    manager._compare(transform)
+
+    expect(listener).toHaveBeenCalledTimes(1)
+  })
+
+  test(`notifies when a subscriber's subscribed-to record type is included in a ReplaceRecordOperation`, () => {
+    const account = { type: 'account', id: '1' }
+
+    const query = q => q.findRecords('account')
+    const listener = jest.fn()
+
+    manager.subscribe(query, listener)
+
+    const operation: ReplaceRecordOperation = { op: 'replaceRecord', record: account }
+    const transform: Transform = { operations: [operation], id: 'test' }
+
+    manager._compare(transform)
+
+    expect(listener).toHaveBeenCalledTimes(1)
+  })
+
+  test(`notifies when a subscriber's subscribed-to record is included in a ReplaceRecordOperation`, () => {
+    const account = { type: 'account', id: '1' }
+
+    const query = q => q.findRecord(account)
+    const listener = jest.fn()
+
+    manager.subscribe(query, listener)
+
+    const operation: ReplaceRecordOperation = { op: 'replaceRecord', record: account }
+    const transform: Transform = { operations: [operation], id: 'test' }
+
+    manager._compare(transform)
+
+    expect(listener).toHaveBeenCalledTimes(1)
+  })
+
+  test(`notifies when a subscriber's subscribed-to record type is included in a RemoveRecordOperation`, () => {
+    const account = { type: 'account', id: '1' }
+
+    const query = q => q.findRecords('account')
+    const listener = jest.fn()
+
+    manager.subscribe(query, listener)
+
+    const operation: RemoveRecordOperation = { op: 'removeRecord', record: account }
+    const transform: Transform = { operations: [operation], id: 'test' }
+
+    manager._compare(transform)
+
+    expect(listener).toHaveBeenCalledTimes(1)
+  })
+
+  test(`notifies when a subscriber's subscribed-to record is included in a RemoveRecordOperation`, () => {
+    const account = { type: 'account', id: '1' }
+
+    const query = q => q.findRecord(account)
+    const listener = jest.fn()
+
+    manager.subscribe(query, listener)
+
+    const operation: RemoveRecordOperation = { op: 'removeRecord', record: account }
+    const transform: Transform = { operations: [operation], id: 'test' }
+
+    manager._compare(transform)
+
+    expect(listener).toHaveBeenCalledTimes(1)
+  })
+
+  test(`notifies when a subscriber's subscribed-to record type is included in a ReplaceKeyOperation`, () => {
+    const account = { type: 'account', id: '1' }
+
+    const query = q => q.findRecords('account')
+    const listener = jest.fn()
+
+    manager.subscribe(query, listener)
+
+    const operation: ReplaceKeyOperation = { op: 'replaceKey', record: account, key: 'testKey', value: 'test' }
+    const transform: Transform = { operations: [operation], id: 'test' }
+
+    manager._compare(transform)
+
+    expect(listener).toHaveBeenCalledTimes(1)
+  })
+
+  test(`notifies when a subscriber's subscribed-to record is included in a ReplaceKeyOperation`, () => {
+    const account = { type: 'account', id: '1' }
+
+    const query = q => q.findRecord(account)
+    const listener = jest.fn()
+
+    manager.subscribe(query, listener)
+
+    const operation: ReplaceKeyOperation = { op: 'replaceKey', record: account, key: 'testKey', value: 'test' }
+    const transform: Transform = { operations: [operation], id: 'test' }
+
+    manager._compare(transform)
+
+    expect(listener).toHaveBeenCalledTimes(1)
+  })
+
+  test(`notifies when a subscriber's subscribed-to record type is included in a ReplaceAttributeOperation`, () => {
+    const account = { type: 'account', id: '1' }
+
+    const query = q => q.findRecords('account')
+    const listener = jest.fn()
+
+    manager.subscribe(query, listener)
+
+    const operation: ReplaceAttributeOperation = { op: 'replaceAttribute', record: account, attribute: 'test', value: 'test' }
+    const transform: Transform = { operations: [operation], id: 'test' }
+
+    manager._compare(transform)
+
+    expect(listener).toHaveBeenCalledTimes(1)
+  })
+
+  test(`notifies when a subscriber's subscribed-to record is included in a ReplaceAttributeOperation`, () => {
+    const account = { type: 'account', id: '1' }
+
+    const query = q => q.findRecord(account)
+    const listener = jest.fn()
+
+    manager.subscribe(query, listener)
+
+    const operation: ReplaceAttributeOperation = { op: 'replaceAttribute', record: account, attribute: 'test', value: 'test' }
+    const transform: Transform = { operations: [operation], id: 'test' }
+
+    manager._compare(transform)
+
+    expect(listener).toHaveBeenCalledTimes(1)
+  })
+
+  test(`notifies when a subscriber's subscribed-to record type is included in a AddToRelatedRecordsOperation (record perspective)`, () => {
+    const account = { type: 'account', id: '1' }
+    const service = { type: 'service', id: '1' }
+
+    const query = q => q.findRecords('account')
+    const listener = jest.fn()
+
+    manager.subscribe(query, listener)
+
+    const operation: AddToRelatedRecordsOperation = { op: 'addToRelatedRecords', record: account, relationship: 'services', relatedRecord: service }
+    const transform: Transform = { operations: [operation], id: 'test' }
+
+    manager._compare(transform)
+
+    expect(listener).toHaveBeenCalledTimes(1)
+  })
+
+  test(`notifies when a subscriber's subscribed-to record is included in a AddToRelatedRecordsOperation (record perspective)`, () => {
+    const account = { type: 'account', id: '1' }
+    const service = { type: 'service', id: '1' }
+
+    const query = q => q.findRecord(account)
+    const listener = jest.fn()
+
+    manager.subscribe(query, listener)
+
+    const operation: AddToRelatedRecordsOperation = { op: 'addToRelatedRecords', record: account, relationship: 'services', relatedRecord: service }
+    const transform: Transform = { operations: [operation], id: 'test' }
+
+    manager._compare(transform)
+
+    expect(listener).toHaveBeenCalledTimes(1)
+  })
+
+  test(`notifies when a subscriber's subscribed-to record type is included in a AddToRelatedRecordsOperation (relation perspective)`, () => {
+    const account = { type: 'account', id: '1' }
+    const service = { type: 'service', id: '1' }
+
+    const query = q => q.findRecords('account')
+    const listener = jest.fn()
+
+    manager.subscribe(query, listener)
+
+    const operation: AddToRelatedRecordsOperation = { op: 'addToRelatedRecords', record: service, relationship: 'subscribers', relatedRecord: account }
+    const transform: Transform = { operations: [operation], id: 'test' }
+
+    manager._compare(transform)
+
+    expect(listener).toHaveBeenCalledTimes(1)
+  })
+
+  test(`notifies when a subscriber's subscribed-to record is included in a AddToRelatedRecordsOperation (relation perspective)`, () => {
+    const account = { type: 'account', id: '1' }
+    const service = { type: 'service', id: '1' }
+
+    const query = q => q.findRecord(account)
+    const listener = jest.fn()
+
+    manager.subscribe(query, listener)
+
+    const operation: AddToRelatedRecordsOperation = { op: 'addToRelatedRecords', record: service, relationship: 'subscribers', relatedRecord: account }
+    const transform: Transform = { operations: [operation], id: 'test' }
+
+    manager._compare(transform)
+
+    expect(listener).toHaveBeenCalledTimes(1)
+  })
+
+  test(`notifies when a subscriber's subscribed-to record type is included in a RemoveFromRelatedRecordsOperation (record perspective)`, () => {
+    const account = { type: 'account', id: '1' }
+    const service = { type: 'service', id: '1' }
+
+    const query = q => q.findRecords('account')
+    const listener = jest.fn()
+
+    manager.subscribe(query, listener)
+
+    const operation: RemoveFromRelatedRecordsOperation = { op: 'removeFromRelatedRecords', record: account, relationship: 'services', relatedRecord: service }
+    const transform: Transform = { operations: [operation], id: 'test' }
+
+    manager._compare(transform)
+
+    expect(listener).toHaveBeenCalledTimes(1)
+  })
+
+  test(`notifies when a subscriber's subscribed-to record is included in a RemoveFromRelatedRecordsOperation (record perspective)`, () => {
+    const account = { type: 'account', id: '1' }
+    const service = { type: 'service', id: '1' }
+
+    const query = q => q.findRecord(account)
+    const listener = jest.fn()
+
+    manager.subscribe(query, listener)
+
+    const operation: RemoveFromRelatedRecordsOperation = { op: 'removeFromRelatedRecords', record: account, relationship: 'services', relatedRecord: service }
+    const transform: Transform = { operations: [operation], id: 'test' }
+
+    manager._compare(transform)
+
+    expect(listener).toHaveBeenCalledTimes(1)
+  })
+
+  test(`notifies when a subscriber's subscribed-to record type is included in a RemoveFromRelatedRecordsOperation (relation perspective)`, () => {
+    const account = { type: 'account', id: '1' }
+    const service = { type: 'service', id: '1' }
+
+    const query = q => q.findRecords('account')
+    const listener = jest.fn()
+
+    manager.subscribe(query, listener)
+
+    const operation: RemoveFromRelatedRecordsOperation = { op: 'removeFromRelatedRecords', record: service, relationship: 'subscriptions', relatedRecord: account }
+    const transform: Transform = { operations: [operation], id: 'test' }
+
+    manager._compare(transform)
+
+    expect(listener).toHaveBeenCalledTimes(1)
+  })
+
+  test(`notifies when a subscriber's subscribed-to record is included in a RemoveFromRelatedRecordsOperation (relation perspective)`, () => {
+    const account = { type: 'account', id: '1' }
+    const service = { type: 'service', id: '1' }
+
+    const query = q => q.findRecord(account)
+    const listener = jest.fn()
+
+    manager.subscribe(query, listener)
+
+    const operation: RemoveFromRelatedRecordsOperation = { op: 'removeFromRelatedRecords', record: service, relationship: 'subscriptions', relatedRecord: account }
+    const transform: Transform = { operations: [operation], id: 'test' }
+
+    manager._compare(transform)
+
+    expect(listener).toHaveBeenCalledTimes(1)
+  })
+
+  test(`notifies when a subscriber's subscribed-to record type is included in a ReplaceRelatedRecordsOperation (record perspective)`, () => {
+    const account = { type: 'account', id: '1' }
+    const service = { type: 'service', id: '2' }
+
+    const query = q => q.findRecords('account')
+    const listener = jest.fn()
+
+    manager.subscribe(query, listener)
+
+    const operation: ReplaceRelatedRecordsOperation = { op: 'replaceRelatedRecords', record: account, relationship: 'services', relatedRecords: [service] }
+    const transform: Transform = { operations: [operation], id: 'test' }
+
+    manager._compare(transform)
+
+    expect(listener).toHaveBeenCalledTimes(1)
+  })
+
+  test(`notifies when a subscriber's subscribed-to record is included in a ReplaceRelatedRecordsOperation (record perspective)`, () => {
+    const account = { type: 'account', id: '1' }
+    const service = { type: 'service', id: '2' }
+
+    const query = q => q.findRecord(account)
+    const listener = jest.fn()
+
+    manager.subscribe(query, listener)
+
+    const operation: ReplaceRelatedRecordsOperation = { op: 'replaceRelatedRecords', record: account, relationship: 'services', relatedRecords: [service] }
+    const transform: Transform = { operations: [operation], id: 'test' }
+
+    manager._compare(transform)
+
+    expect(listener).toHaveBeenCalledTimes(1)
+  })
+
+  test(`notifies when a subscriber's subscribed-to record type is included in a ReplaceRelatedRecordsOperation (relation perspective)`, () => {
+    const account = { type: 'account', id: '1' }
+    const service = { type: 'service', id: '2' }
+
+    const query = q => q.findRecords('account')
+    const listener = jest.fn()
+
+    manager.subscribe(query, listener)
+
+    const operation: ReplaceRelatedRecordsOperation = { op: 'replaceRelatedRecords', record: service, relationship: 'subscriptions', relatedRecords: [account] }
+    const transform: Transform = { operations: [operation], id: 'test' }
+
+    manager._compare(transform)
+
+    expect(listener).toHaveBeenCalledTimes(1)
+  })
+
+  test(`notifies when a subscriber's subscribed-to record is included in a ReplaceRelatedRecordsOperation (relation perspective)`, () => {
+    const account = { type: 'account', id: '1' }
+    const service = { type: 'service', id: '2' }
+
+    const query = q => q.findRecord(account)
+    const listener = jest.fn()
+
+    manager.subscribe(query, listener)
+
+    const operation: ReplaceRelatedRecordsOperation = { op: 'replaceRelatedRecords', record: service, relationship: 'subscriptions', relatedRecords: [account] }
+    const transform: Transform = { operations: [operation], id: 'test' }
+
+    manager._compare(transform)
+
+    expect(listener).toHaveBeenCalledTimes(1)
+  })
+
+  test(`notifies when a subscriber's subscribed-to record type is included in a ReplaceRelatedRecordOperation (record perspective)`, () => {
+    const account = { type: 'account', id: '1' }
+    const profile = { type: 'profile', id: '1' }
+
+    const query = q => q.findRecords('account')
+    const listener = jest.fn()
+
+    manager.subscribe(query, listener)
+
+    const operation: ReplaceRelatedRecordOperation = { op: 'replaceRelatedRecord', record: account, relationship: 'profile', relatedRecord: profile }
+    const transform: Transform = { operations: [operation], id: 'test' }
+
+    manager._compare(transform)
+
+    expect(listener).toHaveBeenCalledTimes(1)
+  })
+
+  test(`notifies when a subscriber's subscribed-to record is included in a ReplaceRelatedRecordOperation (record perspective)`, () => {
+    const account = { type: 'account', id: '1' }
+    const profile = { type: 'profile', id: '1' }
+
+    const query = q => q.findRecord(account)
+    const listener = jest.fn()
+    manager.subscribe(query, listener)
+
+    const operation: ReplaceRelatedRecordOperation = { op: 'replaceRelatedRecord', record: account, relationship: 'profile', relatedRecord: profile }
+    const transform: Transform = { operations: [operation], id: 'test' }
+
+    manager._compare(transform)
+
+    expect(listener).toHaveBeenCalledTimes(1)
+  })
+
+  test(`notifies when a subscriber's subscribed-to record type is included in a ReplaceRelatedRecordOperation (relation perspective)`, () => {
+    const account = { type: 'account', id: '1' }
+    const profile = { type: 'profile', id: '1' }
+
+    const query = q => q.findRecords('account')
+    const listener = jest.fn()
+
+    manager.subscribe(query, listener)
+
+    const operation: ReplaceRelatedRecordOperation = { op: 'replaceRelatedRecord', record: profile, relationship: 'account', relatedRecord: account }
+    const transform: Transform = { operations: [operation], id: 'test' }
+
+    manager._compare(transform)
+
+    expect(listener).toHaveBeenCalledTimes(1)
+  })
+
+  test(`notifies when a subscriber's subscribed-to record is included in a ReplaceRelatedRecordOperation (relation perspective)`, () => {
+    const account = { type: 'account', id: '1' }
+    const profile = { type: 'profile', id: '1' }
+
+    const query = q => q.findRecord(account)
+    const listener = jest.fn()
+
+    manager.subscribe(query, listener)
+
+    const operation: ReplaceRelatedRecordOperation = { op: 'replaceRelatedRecord', record: profile, relationship: 'account', relatedRecord: account }
+    const transform: Transform = { operations: [operation], id: 'test' }
+
+    manager._compare(transform)
+
+    expect(listener).toHaveBeenCalledTimes(1)
+  })
+})
+
+

@@ -1,14 +1,14 @@
 import Store from '@orbit/store'
-import { Transform, RecordOperation } from '@orbit/data'
+import { Transform, RecordOperation, Record } from '@orbit/data'
 
 import { Observable } from './Observable'
-import { getUpdatedRecords, shouldUpdate } from './helpers'
-import { Term, Queries, Expressions, RecordData, Status, QueryRefs } from './types'
+import { getUpdatedRecords, shouldUpdate, getTermsOrExpression, hashQueryIdentifier, validateOptions } from './helpers'
+import { Term, Queries, Expression, RecordData, Status, QueryRefs, Query, RecordObject, Options, SingleOptions, MultipleOptions } from './types'
 
 export class QueryManager extends Observable {
   _store: Store
   _queryRefs: QueryRefs = {}
-  _afterQueryQueue: Function[] = []
+  _afterQueryQueue: { [key: string]: Function[] } = {}
 
 
   constructor (store: Store) {
@@ -16,16 +16,14 @@ export class QueryManager extends Observable {
     this._store = store
   }
 
-  _extractTerms (queries: Queries): Term[] {
-    return Object.keys(queries).sort().map(
-      (key) => ({ key, expression: queries[key](this._store.queryBuilder).expression as Expressions })
-    )
-  }
-
   // @ts-ignore
-  subscribe (queries: Queries, listener: Function) {
-    const terms = this._extractTerms(queries)
-    const id = JSON.stringify(terms)
+  subscribe (queryOrQueries: Query | Queries, listener: Function, options?: Options) {
+
+    const termsOrExpression = getTermsOrExpression(queryOrQueries)
+
+    validateOptions(termsOrExpression, options)
+
+    const id = hashQueryIdentifier(termsOrExpression, options)
 
     if (Object.keys(this._subscriptions).length === 0) {
       this._store.on('transform', this._compare)
@@ -41,82 +39,110 @@ export class QueryManager extends Observable {
       }
 
       if (this._queryRefs[id] && !this._subscriptions[id]) {
-        this._afterQueryQueue.push(() => delete this._queryRefs[id])
+        this._afterQueryQueue[id].push(() => delete this._queryRefs[id])
       }
     }
   }
 
-  query (queries: Queries) {
-    const terms = this._extractTerms(queries)
-    const id = JSON.stringify(terms)
+  query (queryOrQueries: Query | Queries, options?: Options): [RecordData, Status] {
+
+    const termsOrExpression = getTermsOrExpression(queryOrQueries)
+
+    validateOptions(termsOrExpression, options)
+
+    const id = hashQueryIdentifier(termsOrExpression, options)
 
     if (!this._queryRefs[id]) {
-      this._queryRefs[id] = { loading: false, error: null }
+      this._queryRefs[id] = { isLoading: false, isError: false }
     }
 
-    if (!this._queryRefs[id].loading) {
-      this._queryRefs[id].loading = true
-      this._query(id, terms)
-      this._afterQueryQueue.forEach(fn => fn())
-      this._afterQueryQueue = []
+    if (!this._queryRefs[id].isLoading) {
+      this._queryRefs[id].isLoading = true
+      this._afterQueryQueue[id] = []
+
+      this._query(id, termsOrExpression, options)
     }
 
     return [null, this._queryRefs[id]]
   }
 
-  async _query (id: string, terms: Term[]) {
+  async _query (id: string, termsOrExpression: Term[] | Expression, options?: Options) {
 
-    let data: RecordData = null
+    let data: RecordData
+    this._queryRefs[id].isError = false
     try {
-      const result = await Promise.all(terms
-        .map(({ key, expression }) =>
-          new Promise<RecordData>((resolve, reject) => {
-            this._store.query(expression)
-              .then(record => resolve({ [key]: record }))
-              .catch(reject)
-          })
-        )
-      )
+      data = !Array.isArray(termsOrExpression)
+        ? await this._makeSingleQuery(termsOrExpression, options as SingleOptions)
+        : await this._makeMultipleQueries(termsOrExpression, options as MultipleOptions)
 
-      data = result.reduce((acc, record) => ({ ...acc, ...record }))
-    } catch (error) {
-      this._queryRefs[id].error = error
-
+    } catch  {
+      this._queryRefs[id].isError = true
     } finally {
-      this._queryRefs[id].loading = false
-      super.notify(id, [data, this._queryRefs[id]])
+      this._queryRefs[id].isLoading = false
+      super.notify(id, [data || null, this._queryRefs[id]])
+
+      this._afterQueryQueue[id].forEach(fn => fn())
+      delete this._afterQueryQueue[id]
     }
   }
 
-  queryCache (queries: Queries) {
-    const terms = this._extractTerms(queries)
-
-    return this._queryCache(terms)
+  async _makeSingleQuery (expression: Expression, options?: SingleOptions) {
+    return new Promise<Record>((resolve, reject) => {
+      this._store.query(expression, options)
+        .then(record => resolve(record))
+        .catch(reject)
+    })
   }
 
-  _queryCache (terms: Term[]): [RecordData, Status] {
-    let data = null
-    let error = null
+  async _makeMultipleQueries (terms: Term[], options: MultipleOptions = []) {
+    const results = await Promise.all(terms.map(({ key, expression }) =>
+      new Promise<RecordObject>((resolve, reject) => {
+
+        const currentOptions = options.find(option => option.queryKey === key) || { options: {} }
+
+        this._makeSingleQuery(expression, currentOptions.options)
+          .then(record => resolve({ [key]: record }))
+          .catch(reject)
+      })
+    ))
+
+    return results.reduce((acc, record) => ({ ...acc, ...record }))
+  }
+
+  queryCache (queryOrQueries: Query | Queries): [RecordData, Status] {
+    const termsOrExpression = getTermsOrExpression(queryOrQueries)
+
+    return this._queryCache(termsOrExpression)
+  }
+
+  _queryCache (termsOrExpression: Term[] | Expression): [RecordData, Status] {
+    let data: RecordData = null
+    let isError = false
+
     try {
-      data = terms
-        .map(({ key, expression }) => ({ [key]: this._store.cache.query(expression) }))
-        .reduce((acc, record) => ({ ...acc, ...record }))
+      data = !Array.isArray(termsOrExpression)
+        ? this._store.cache.query(termsOrExpression) as Record
+        : termsOrExpression
+          .map(({ key, expression }) => ({ [key]: this._store.cache.query(expression) }))
+          .reduce((acc, record) => ({ ...acc, ...record }))
 
-    } catch (reason) {
-      error = reason
+    } catch {
+      isError = true
     }
 
-    return [data, { error }]
+    return [data, { isError, isLoading: false }]
   }
 
   _compare = (transform: Transform) => {
     const { records, relatedRecords } = getUpdatedRecords(transform.operations as RecordOperation[])
 
     Object.keys(this._subscriptions).forEach(id => {
-      const terms = JSON.parse(id)
+      const termsOrExpression = JSON.parse(id)
 
-      if (shouldUpdate(terms, records, relatedRecords)) {
-        const data = this._queryCache(terms)
+      const isLoading = this._queryRefs[id] ? this._queryRefs[id].isLoading : false
+
+      if (!isLoading && shouldUpdate(termsOrExpression, records, relatedRecords)) {
+        const data = this._queryCache(termsOrExpression)
         super.notify(id, data)
       }
     })
