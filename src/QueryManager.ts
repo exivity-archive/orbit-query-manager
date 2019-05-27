@@ -4,15 +4,16 @@ import { Transform, RecordOperation, Record } from '@orbit/data'
 import { Observable } from './Observable'
 import { getUpdatedRecords, shouldUpdate, getTermsOrExpression, hashQueryIdentifier, validateOptions } from './helpers'
 import { Term, Queries, Expression, RecordData, Status, QueryRefs, Query, RecordObject, Options, SingleOptions, MultipleOptions, Data, Listener } from './types'
+import { FetchManager } from './FetchManager'
 
 export class QueryManager extends Observable<Data> {
   _store: Store
-  _queryRefs: QueryRefs = {}
-  _afterQueryQueue: { [key: string]: Function[] } = {}
+  _fetchManager: FetchManager
 
   constructor (store: Store) {
     super()
     this._store = store
+    this._fetchManager = new FetchManager(store)
   }
 
   // @ts-ignore
@@ -29,84 +30,20 @@ export class QueryManager extends Observable<Data> {
     }
 
     const unsubscribe = super.subscribe(id, listener)
+    const unsubscribeToFetch = this._fetchManager.subscribe(id, listener)
 
     return () => {
       unsubscribe()
+      unsubscribeToFetch()
 
       if (Object.keys(this._subscriptions).length === 0) {
         this._store.off('transform', this._compare)
       }
-
-      if (this._queryRefs[id] && !this._subscriptions[id]) {
-        this._afterQueryQueue[id].push(() => delete this._queryRefs[id])
-      }
     }
   }
 
-  query (queryOrQueries: Query | Queries, options?: Options): [RecordData, Status] {
-
-    const termsOrExpression = getTermsOrExpression(queryOrQueries)
-
-    validateOptions(termsOrExpression, options)
-
-    const id = hashQueryIdentifier(termsOrExpression, options)
-
-    if (!this._queryRefs[id]) {
-      this._queryRefs[id] = { isLoading: false, isError: false }
-    }
-
-    if (!this._queryRefs[id].isLoading) {
-      this._queryRefs[id].isLoading = true
-      this._afterQueryQueue[id] = []
-
-      this._query(id, termsOrExpression, options)
-    }
-
-    return [null, this._queryRefs[id]]
-  }
-
-  async _query (id: string, termsOrExpression: Term[] | Expression, options?: Options) {
-
-    let data: RecordData = null
-    let isError: boolean = false
-    try {
-      data = !Array.isArray(termsOrExpression)
-        ? await this._makeSingleQuery(termsOrExpression, options as SingleOptions)
-        : await this._makeMultipleQueries(termsOrExpression, options as MultipleOptions)
-
-    } catch  {
-      isError = true
-    } finally {
-      const status = { isLoading: false, isError }
-      this._queryRefs[id] = status
-      super.notify(id, [data, status])
-
-      this._afterQueryQueue[id].forEach(fn => fn())
-      delete this._afterQueryQueue[id]
-    }
-  }
-
-  async _makeSingleQuery (expression: Expression, options?: SingleOptions) {
-    return new Promise<Record>((resolve, reject) => {
-      this._store.query(expression, options)
-        .then(record => resolve(record))
-        .catch(reject)
-    })
-  }
-
-  async _makeMultipleQueries (terms: Term[], options: MultipleOptions = []) {
-    const results = await Promise.all(terms.map(({ key, expression }) =>
-      new Promise<RecordObject>((resolve, reject) => {
-
-        const currentOptions = options.find(option => option.queryKey === key) || { options: {} }
-
-        this._makeSingleQuery(expression, currentOptions.options)
-          .then(record => resolve({ [key]: record }))
-          .catch(reject)
-      })
-    ))
-
-    return results.reduce((acc, record) => ({ ...acc, ...record }))
+  query (queryOrQueries: Query | Queries, options?: Options) {
+    return this._fetchManager.query(queryOrQueries, options)
   }
 
   queryCache (queryOrQueries: Query | Queries): [RecordData, Status] {
@@ -139,7 +76,7 @@ export class QueryManager extends Observable<Data> {
     Object.keys(this._subscriptions).forEach(id => {
       const termsOrExpression = JSON.parse(id)
 
-      const isLoading = this._queryRefs[id] ? this._queryRefs[id].isLoading : false
+      const isLoading = this._fetchManager._queryRefs[id] ? this._fetchManager._queryRefs[id].isLoading : false
 
       if (!isLoading && shouldUpdate(termsOrExpression, records, relatedRecords)) {
         const data = this._queryCache(termsOrExpression)
