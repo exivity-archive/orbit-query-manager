@@ -14,15 +14,18 @@ export class CacheManager extends Observable<Data> {
   }
 
   subscribe (id: string, listener: Listener<Data>) {
-    const unsubscribe = super.subscribe(id, listener)
 
+    // Should stay above the super.subscribe call since it depends on the length of subscriptions
     if (Object.keys(this._subscriptions).length === 0) {
       this._store.on('transform', this._compare)
     }
 
+    const unsubscribe = super.subscribe(id, listener)
+
     return () => {
       unsubscribe()
 
+      // Should stay below the super.subscribe call since it depends on the length of subscriptions
       if (Object.keys(this._subscriptions).length === 0) {
         this._store.off('transform', this._compare)
       }
