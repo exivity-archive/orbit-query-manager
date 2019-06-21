@@ -1,9 +1,10 @@
 import Store from '@orbit/store'
 
-import { getTermsOrExpression, hashQueryIdentifier, validateOptions } from './helpers'
-import { Queries, Query, Options, Data, Listener } from './types'
-import { FetchManager } from './FetchManager'
-import { CacheManager } from './CacheManager';
+import { CacheManager } from '../CacheObserver'
+import { FetchManager } from '../FetchObserver'
+
+import { Queries, Query, Options, Data, Listener } from '../types'
+import { getTermsOrExpression, hashQueryIdentifier, validateOptions } from '../helpers'
 
 export class QueryManager {
 

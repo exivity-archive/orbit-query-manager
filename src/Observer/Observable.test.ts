@@ -1,5 +1,4 @@
-import { Observable } from '../Observable'
-import { RecordData, Status } from '../types';
+import { Observable } from './Observable'
 
 let observable: Observable<any>
 beforeEach(() => {

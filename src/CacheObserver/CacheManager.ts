@@ -1,8 +1,10 @@
-import { Observable } from './Observable'
-import { Data, Listener, Query, Queries, Term, Expression, RecordData } from './types'
-import Store from '@orbit/store';
-import { getTermsOrExpression, getUpdatedRecords, shouldUpdate } from './helpers'
+import Store from '@orbit/store'
 import { Record, Transform, RecordOperation } from '@orbit/data'
+
+import { Observable } from '../Observer'
+
+import { getTermsOrExpression, getUpdatedRecords, shouldUpdate } from '../helpers'
+import { Data, Listener, Query, Queries, Term, Expression, RecordData } from '../types'
 
 export class CacheManager extends Observable<Data> {
 

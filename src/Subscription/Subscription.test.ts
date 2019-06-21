@@ -1,5 +1,4 @@
-import { Subscription } from '../Subscription'
-import { RecordData, Status } from '../types'
+import { Subscription } from './Subscription'
 
 let subscription: Subscription<any>
 beforeEach(() => {

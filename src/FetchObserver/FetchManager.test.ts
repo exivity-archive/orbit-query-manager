@@ -1,9 +1,11 @@
-import { QueryBuilder, Schema, ModelDefinition } from '@orbit/data'
 import Store from '@orbit/store'
 import { Dict } from '@orbit/utils'
-import { Expression, Term } from '../types';
-import { Subscription } from '../Subscription';
-import { FetchManager } from '../FetchManager';
+import { QueryBuilder, Schema, ModelDefinition } from '@orbit/data'
+
+import { Subscription } from '../Subscription'
+import { FetchManager } from './FetchManager'
+
+import { Expression, Term } from '../types'
 
 const modelDefenition: Dict<ModelDefinition> = {
   account: {
@@ -129,7 +131,7 @@ describe('_query(...)', () => {
     manager._queryRefs[id] = { isLoading: true, isError: null }
     manager._afterQueryQueue[id] = []
 
-    await manager._query(id, expression)
+    await manager._tryQuery(id, expression)
 
     expect(manager._queryRefs[id].isLoading).toBe(false)
     done()
@@ -145,7 +147,7 @@ describe('_query(...)', () => {
     manager._queryRefs[id] = { isLoading: true, isError: null }
     manager._afterQueryQueue[id] = []
 
-    await manager._query(id, expression)
+    await manager._tryQuery(id, expression)
 
     expect(manager._queryRefs[id].isError).toBe(true)
     done()
@@ -167,7 +169,7 @@ describe('_query(...)', () => {
     manager._queryRefs[id] = { isLoading: true, isError: null }
     manager._afterQueryQueue[id] = []
 
-    await manager._query(id, terms)
+    await manager._tryQuery(id, terms)
 
     expect(manager._queryRefs[id].isError).toBe(true)
     done()
@@ -181,12 +183,11 @@ describe('_query(...)', () => {
 
     const listener = jest.fn()
 
-    manager._subscriptions[id] = new Subscription()
-    manager._subscriptions[id].addListener(listener)
+    manager.subscribe(id, listener)
     manager._queryRefs[id] = { isLoading: true, isError: null }
     manager._afterQueryQueue[id] = []
 
-    await manager._query(id, expression)
+    await manager._tryQuery(id, expression)
 
     expect(listener).toBeCalledTimes(1)
     done()
@@ -203,12 +204,11 @@ describe('_query(...)', () => {
     // returns record
     const listener = jest.fn(result => result[0])
 
-    manager._subscriptions[id] = new Subscription()
-    manager._subscriptions[id].addListener(listener)
+    manager.subscribe(id, listener)
     manager._queryRefs[id] = { isLoading: true, isError: null }
     manager._afterQueryQueue[id] = []
 
-    await manager._query(id, expression)
+    await manager._tryQuery(id, expression)
 
     expect(listener).toReturnWith(account)
     done()
@@ -223,12 +223,11 @@ describe('_query(...)', () => {
     // returns record
     const listener = jest.fn(result => result[0])
 
-    manager._subscriptions[id] = new Subscription()
-    manager._subscriptions[id].addListener(listener)
+    manager.subscribe(id, listener)
     manager._queryRefs[id] = { isLoading: true, isError: null }
     manager._afterQueryQueue[id] = []
 
-    await manager._query(id, expression)
+    await manager._tryQuery(id, expression)
 
     expect(listener).toReturnWith(null)
     done()
@@ -249,12 +248,11 @@ describe('_query(...)', () => {
     // returns record
     const listener = jest.fn(result => result[0])
 
-    manager._subscriptions[id] = new Subscription()
-    manager._subscriptions[id].addListener(listener)
+    manager.subscribe(id, listener)
     manager._queryRefs[id] = { isLoading: true, isError: null }
     manager._afterQueryQueue[id] = []
 
-    await manager._query(id, terms)
+    await manager._tryQuery(id, terms)
 
     expect(listener).toReturnWith({ Account1: account1, Account2: account2 })
     done()
@@ -275,12 +273,11 @@ describe('_query(...)', () => {
     // returns record
     const listener = jest.fn(result => result[0])
 
-    manager._subscriptions[id] = new Subscription()
-    manager._subscriptions[id].addListener(listener)
+    manager.subscribe(id, listener)
     manager._queryRefs[id] = { isLoading: true, isError: null }
     manager._afterQueryQueue[id] = []
 
-    await manager._query(id, terms)
+    await manager._tryQuery(id, terms)
 
     expect(listener).toReturnWith(null)
     done()
@@ -298,7 +295,7 @@ describe('_query(...)', () => {
     manager._queryRefs[id] = { isLoading: true, isError: null }
     manager._afterQueryQueue[id] = [afterQueryCallback, afterQueryCallback, afterQueryCallback]
 
-    await manager._query(id, expression)
+    await manager._tryQuery(id, expression)
 
     expect(afterQueryCallback).toBeCalledTimes(3)
     done()
@@ -314,7 +311,7 @@ describe('_query(...)', () => {
     manager._queryRefs[id] = { isLoading: true, isError: null }
     manager._afterQueryQueue[id] = []
 
-    await manager._query(id, expression)
+    await manager._tryQuery(id, expression)
 
     expect(manager._afterQueryQueue[id]).toBeUndefined()
     done()

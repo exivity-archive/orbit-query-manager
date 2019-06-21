@@ -38,7 +38,7 @@ export interface Status {
   isError: boolean
 }
 
-export interface QueryRefs {
+export interface Statuses {
   [id: string]: Status
 }
 

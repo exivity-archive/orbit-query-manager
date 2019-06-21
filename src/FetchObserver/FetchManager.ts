@@ -1,13 +1,30 @@
-import { Query, Queries, Options, Data, QueryRefs, RecordData, Term, Expression, SingleOptions, MultipleOptions, RecordObject, Listener } from './types';
-import { getTermsOrExpression, validateOptions, hashQueryIdentifier } from './helpers';
-import { Observable } from './Observable';
-import Store from '@orbit/store';
-import { Record } from '@orbit/data';
+import Store from '@orbit/store'
+import { Record } from '@orbit/data'
+
+import { Observable } from '../Observer'
+
+import { getTermsOrExpression, validateOptions, hashQueryIdentifier } from '../helpers'
+import {
+  Query,
+  Queries,
+  Options,
+  Data,
+  Statuses,
+  RecordData,
+  Term,
+  Expression,
+  SingleOptions,
+  MultipleOptions,
+  RecordObject,
+  Listener,
+  Status
+} from '../types'
+
 
 export class FetchManager extends Observable<Data> {
 
   _store: Store
-  _queryRefs: QueryRefs = {}
+  _queryRefs: Statuses = {}
   _afterQueryQueue: { [key: string]: Function[] } = {}
 
   constructor (store: Store) {
@@ -20,6 +37,7 @@ export class FetchManager extends Observable<Data> {
 
     return () => {
       unsubscribe()
+
       if (this._queryRefs[id] && !this._subscriptions[id]) {
         this._afterQueryQueue[id].push(() => delete this._queryRefs[id])
       }
@@ -34,40 +52,56 @@ export class FetchManager extends Observable<Data> {
 
     const id = hashQueryIdentifier(termsOrExpression, options)
 
-    if (!this._queryRefs[id]) {
-      this._queryRefs[id] = { isLoading: false, isError: false }
-    }
+    if (!this._queryRefs[id]) this._initQueryRef(id)
 
     if (!this._queryRefs[id].isLoading) {
-      this._queryRefs[id].isLoading = true
-      this._afterQueryQueue[id] = []
-
-      this._query(id, termsOrExpression, options)
+      this._setupForQuery(id);
+      this._tryQuery(id, termsOrExpression, options)
     }
 
     return [null, this._queryRefs[id]]
   }
 
+  _setupForQuery (id: string) {
+    this._queryRefs[id].isLoading = true;
+    this._afterQueryQueue[id] = [];
+  }
 
-  async _query (id: string, termsOrExpression: Term[] | Expression, options?: Options) {
+  async _tryQuery (id: string, termsOrExpression: Term[] | Expression, options?: Options) {
 
     let data: RecordData = null
     let isError: boolean = false
     try {
-      data = !Array.isArray(termsOrExpression)
-        ? await this._makeSingleQuery(termsOrExpression, options as SingleOptions)
-        : await this._makeMultipleQueries(termsOrExpression, options as MultipleOptions)
-
+      data = await this._makeQuery(termsOrExpression, options)
     } catch  {
       isError = true
     } finally {
-      const status = { isLoading: false, isError }
-      this._queryRefs[id] = status
+      this._updateStatus(id, { isError, isLoading: false })
+
+      const status = this._getStatus(id)
       super.notify(id, [data, status])
 
-      this._afterQueryQueue[id].forEach(fn => fn())
-      delete this._afterQueryQueue[id]
+      this._runAfterQueryQueue(id);
     }
+  }
+
+  _updateStatus (id: string, status: Status) {
+    this._queryRefs[id] = status
+  }
+
+  _getStatus (id: string) {
+    return this._queryRefs[id]
+  }
+
+  _runAfterQueryQueue (id: string) {
+    this._afterQueryQueue[id].forEach(fn => fn());
+    delete this._afterQueryQueue[id];
+  }
+
+  async _makeQuery (termsOrExpression, options: Options): Promise<Record | RecordObject> {
+    return !Array.isArray(termsOrExpression)
+      ? await this._makeSingleQuery(termsOrExpression, options as SingleOptions)
+      : await this._makeMultipleQueries(termsOrExpression, options as MultipleOptions);
   }
 
   async _makeSingleQuery (expression: Expression, options?: SingleOptions) {
@@ -91,5 +125,9 @@ export class FetchManager extends Observable<Data> {
     ))
 
     return results.reduce((acc, record) => ({ ...acc, ...record }))
+  }
+
+  _initQueryRef (id: string) {
+    this._queryRefs[id] = { isLoading: false, isError: false }
   }
 }
