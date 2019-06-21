@@ -1,7 +1,6 @@
-import { Observable } from '../Observable'
-import { RecordData, Status } from '../types';
+import { Observable } from './Observable'
 
-let observable: Observable
+let observable: Observable<any>
 beforeEach(() => {
   observable = new Observable()
 })
@@ -18,22 +17,22 @@ describe('subscribe(...)', () => {
     expect(observable._subscriptions[id]).toBeDefined()
   })
 
-  test('should add a new listener to the map entry on the first call', () => {
+  test('should add a new listener to the subscription', () => {
     const id = 'test'
     const listener = jest.fn()
 
     observable.subscribe(id, listener)
 
-    expect(observable._subscriptions[id]).toMatchObject([listener])
+    expect(observable._subscriptions[id]._listeners).toMatchObject([listener])
   })
 
-  test('should add a new listener to the map entry on every consecutive call', () => {
+  test('should add a new listener to the subscription on every consecutive call', () => {
     const id = 'test'
     const listeners = [jest.fn(), jest.fn(), jest.fn()]
 
     listeners.forEach(listener => observable.subscribe(id, listener))
 
-    expect(observable._subscriptions[id]).toMatchObject(listeners)
+    expect(observable._subscriptions[id]._listeners).toMatchObject(listeners)
   })
 
   test('should return an unsubscribe function that deletes a listener from the subscriptions', () => {
@@ -44,11 +43,11 @@ describe('subscribe(...)', () => {
     observable.subscribe(id, listener1)
     const unsubscribe = observable.subscribe(id, listener2)
 
-    expect(observable._subscriptions[id]).toMatchObject([listener1, listener2])
+    expect(observable._subscriptions[id]._listeners).toMatchObject([listener1, listener2])
 
     unsubscribe()
 
-    expect(observable._subscriptions[id]).toMatchObject([listener1])
+    expect(observable._subscriptions[id]._listeners).toMatchObject([listener1])
   })
 
   test('should return an unsubscribe function that deletes the subscriptions entry if no listeners are left', () => {
@@ -57,7 +56,7 @@ describe('subscribe(...)', () => {
 
     const unsubscribes = listeners.map(listener => observable.subscribe(id, listener))
 
-    expect(observable._subscriptions[id]).toMatchObject(listeners)
+    expect(observable._subscriptions[id]._listeners).toMatchObject(listeners)
 
     unsubscribes.forEach(unsubscribe => unsubscribe())
 
@@ -69,7 +68,7 @@ describe('notify(...)', () => {
   test('should call all listeners added to a map entry for a certain id', () => {
     const id = 'test'
     const listeners = [jest.fn(), jest.fn(), jest.fn()]
-    const data = [{ test: { id: '1', type: 'test' } }, { isError: null, isLoading: false }] as [RecordData, Status]
+    const data = 'data'
 
     listeners.forEach(listener => observable.subscribe(id, listener))
     observable.notify(id, data)

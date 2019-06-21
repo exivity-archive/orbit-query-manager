@@ -1,2 +1,2 @@
-export * from './QueryManager'
-export * from './types'
+export * from './QueryObservable/QueryManager'
+export * from './utils/types'
