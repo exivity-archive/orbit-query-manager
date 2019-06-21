@@ -1,7 +1,7 @@
 import Store from '@orbit/store'
 
-import { CacheManager } from '../CacheObserver'
-import { FetchManager } from '../FetchObserver'
+import { CacheManager } from '../CacheObservable'
+import { FetchManager } from '../FetchObservable'
 
 import { Queries, Query, Options, Data, Listener } from '../utils/types'
 import { getTermsOrExpression, validateOptions, hashQueryIdentifier } from '../utils/parseQuery'

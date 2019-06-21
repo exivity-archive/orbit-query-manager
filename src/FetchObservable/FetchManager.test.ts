@@ -1,43 +1,12 @@
-import Store from '@orbit/store'
-import { Dict } from '@orbit/utils'
-import { QueryBuilder, Schema, ModelDefinition } from '@orbit/data'
+import { QueryBuilder } from '@orbit/data'
 
 import { Subscription } from '../Subscription'
 import { FetchManager } from './FetchManager'
 
+import { TestStore } from '../utils/testing/TestStore'
 import { Expression, Term } from '../utils/types'
 
-const modelDefenition: Dict<ModelDefinition> = {
-  account: {
-    attributes: {
-      test: { type: 'string' }
-    },
-    relationships: {
-      profile: { type: 'hasOne', inverse: 'account', model: 'profile' },
-      services: { type: 'hasMany', inverse: 'subscribers', model: 'service' }
-    }
-  },
-  profile: {
-    attributes: {
-      test: { type: 'string' }
-    },
-    relationships: {
-      account: { type: 'hasOne', inverse: 'profile', model: 'account' }
-    }
-  },
-  service: {
-    attributes: {
-      test: { type: 'string' }
-    },
-    relationships: {
-      subscribers: { type: 'hasMany', inverse: 'services', model: 'account' }
-    }
-  }
-}
-
-const store = new Store({
-  schema: new Schema({ models: modelDefenition })
-})
+const store = new TestStore()
 
 let manager: FetchManager
 beforeEach(() => {

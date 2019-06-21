@@ -1,10 +1,10 @@
 import Store from '@orbit/store'
 import { Record, Transform, RecordOperation } from '@orbit/data'
 
-import { Observable } from '../Observer'
+import { Observable } from '../Observable'
 
 import { getTermsOrExpression } from '../utils/parseQuery'
-import { getUpdatedRecords, shouldUpdate } from '../helpers'
+import { getUpdatedRecords, shouldUpdate } from '../utils/changeManagement'
 import { Data, Listener, Query, Queries, Term, Expression, RecordData } from '../utils/types'
 
 export class CacheManager extends Observable<Data> {

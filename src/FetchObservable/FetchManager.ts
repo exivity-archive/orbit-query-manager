@@ -1,7 +1,7 @@
 import Store from '@orbit/store'
 import { Record } from '@orbit/data'
 
-import { Observable } from '../Observer'
+import { Observable } from '../Observable'
 
 import {
   Query,
