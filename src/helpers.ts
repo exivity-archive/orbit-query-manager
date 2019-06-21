@@ -1,5 +1,5 @@
 import { RecordOperation, RecordIdentity, QueryBuilder } from '@orbit/data'
-import { Expression, Term, Options, Query, Queries } from './types'
+import { Expression, Term, Options, Query, Queries } from './utils/types'
 
 export const getTermsOrExpression = (queryOrQueries: Query | Queries) => {
   return typeof queryOrQueries === 'function'

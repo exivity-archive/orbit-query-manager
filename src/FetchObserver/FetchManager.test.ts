@@ -5,7 +5,7 @@ import { QueryBuilder, Schema, ModelDefinition } from '@orbit/data'
 import { Subscription } from '../Subscription'
 import { FetchManager } from './FetchManager'
 
-import { Expression, Term } from '../types'
+import { Expression, Term } from '../utils/types'
 
 const modelDefenition: Dict<ModelDefinition> = {
   account: {

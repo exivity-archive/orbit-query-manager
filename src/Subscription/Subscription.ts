@@ -1,4 +1,4 @@
-import { Listener } from '../types'
+import { Listener } from '../utils/types'
 
 export class Subscription<T> {
   _listeners: Listener<T>[] = []

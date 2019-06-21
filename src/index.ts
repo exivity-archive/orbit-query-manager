@@ -1,2 +1,2 @@
 export * from './QueryObserver/QueryManager'
-export * from './types'
+export * from './utils/types'

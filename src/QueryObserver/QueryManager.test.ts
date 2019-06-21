@@ -4,7 +4,7 @@ import { QueryBuilder, Schema, ModelDefinition } from '@orbit/data'
 
 import { QueryManager } from './QueryManager'
 
-import { Expression } from '../types'
+import { Expression } from '../utils/types'
 
 const modelDefinition: Dict<ModelDefinition> = {
   account: {

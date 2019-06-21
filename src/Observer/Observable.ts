@@ -1,6 +1,6 @@
 import { Subscription } from '../Subscription'
 
-import { Listener } from '../types'
+import { Listener } from '../utils/types'
 
 export class Observable<T> {
   _subscriptions: { [id: string]: Subscription<T> } = {}

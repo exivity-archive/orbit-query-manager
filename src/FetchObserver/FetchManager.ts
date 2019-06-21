@@ -3,7 +3,6 @@ import { Record } from '@orbit/data'
 
 import { Observable } from '../Observer'
 
-import { getTermsOrExpression, validateOptions, hashQueryIdentifier } from '../helpers'
 import {
   Query,
   Queries,
@@ -18,7 +17,8 @@ import {
   RecordObject,
   Listener,
   Status
-} from '../types'
+} from '../utils/types'
+import { getTermsOrExpression, validateOptions, hashQueryIdentifier } from '../utils/parseQuery'
 
 
 export class FetchManager extends Observable<Data> {
